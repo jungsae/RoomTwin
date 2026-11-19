@@ -36,14 +36,23 @@ adb shell am start -n com.roomtwin.nativeai/.MainActivity
 
 앱에서 짧은 질문을 입력하고 **추론 실행**을 누른다. 첫 요청에 모델을 로드한다. 이미지 추론은 **이미지 선택**에서 사진 한 장을 고른 뒤 질문을 입력하고 실행한다. 앱이 선택한 파일을 기기에서 읽을 수 있어야 한다.
 
-## 호스트 빌드 및 정적 검사
+## 실내 사진 분석
+
+1. **이미지 선택**에서 기기에 저장된 실내 사진 한 장을 고른다.
+2. **실내 사진 분석 · JSON**을 누른다. 앱이 실내 분석용 프롬프트를 자동으로 사용한다.
+3. 결과에서 초기화·이미지 전처리·추론·전체 소요 시간, 원본 모델 응답, JSON 검증 상태를 확인한다. 검증에 성공하면 **검증된 JSON**이 원본 아래에 표시된다.
+4. 자유 질문은 기존 **추론 실행**을 사용한다. 이미지를 제거하면 텍스트만 입력할 수 있다.
+
+필드와 오류 처리 기준은 [JSON 스키마 1.0](ROOM_ANALYSIS_SCHEMA.md)을 참조한다.
+
+## 호스트 빌드, 단위 테스트 및 정적 검사
 
 ```sh
 cd native-ai
-gradle :app:assembleDebug :app:lintDebug
+gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-이 명령은 빌드와 Android Lint를 확인한다. 실기기 추론은 아래 절차로 확인한다.
+이 명령은 JSON 호스트 단위 테스트, APK 빌드, Android Lint를 실행한다. 실기기 추론은 아래 절차로 확인한다.
 
 ## 공식 문서에서 확인한 사항
 
@@ -51,7 +60,11 @@ gradle :app:assembleDebug :app:lintDebug
 - Gemma 4 E2B IT는 LiteRT-LM용 `.litertlm` 파일로 배포된다. 모델 카드에는 텍스트·이미지·오디오 지원과 특정 장비에서 측정한 성능이 공개되어 있다. [LiteRT Community 모델 카드](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm)
 - AGP 9.1.1의 최소 Gradle과 JDK는 각각 9.3.1과 17이다. [Android Developers의 AGP 호환성 표](https://developer.android.com/build/releases/agp-9-1-0-release-notes#compatibility)
 
-## 검증 완료
+## 실내 분석 검증
+
+Galaxy S20+에서 침실·거실·주방 사진과 침실 반복 입력이 모두 JSON 1.0 검증을 통과했다. 사진 출처, 모델 원본 응답, 인식 오류, 단계별 시간과 PSS는 [실기기 검증 기록](ROOM_ANALYSIS_VALIDATION.md)에 있다.
+
+## 기본 추론 검증 완료
 
 2026-11-19에 호스트 빌드와 Galaxy S20+ (`SM-G986N`, Android 13/API 33, `arm64-v8a`)에서 다음을 확인했다. 실기기에는 LiteRT-LM Android 0.19.0, CPU 텍스트·비전 백엔드와 위 리비전의 모델을 사용했다.
 
@@ -64,7 +77,7 @@ gradle :app:assembleDebug :app:lintDebug
 
 - 기기 네트워크를 실제로 차단한 상태에서 텍스트와 이미지 추론을 완료할 수 있는지 확인한다.
 - 추론 중 중복 실행 차단과 화면 닫기·회전 후 재실행을 확인한다.
-- 손상되거나 읽을 수 없는 이미지 및 초기화에 실패한 모델에서 오류 안내와 재시도를 확인한다.
+- 초기화에 실패한 모델에서 오류 안내와 재시도를 확인한다.
 - 다른 ARM64 기기에서 호환성, 모델 로드 시간, 단일·반복 추론 시간, 메모리와 발열을 측정한다.
 
 ## 실기기 재현 및 추가 검증

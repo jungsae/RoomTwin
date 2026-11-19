@@ -11,7 +11,9 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import com.google.ai.edge.litertlm.ResponseFormat
 import java.util.concurrent.Executors
+import kotlin.time.measureTimedValue
 
 class MainActivity : Activity() {
     private lateinit var runner: GemmaRunner
@@ -19,7 +21,12 @@ class MainActivity : Activity() {
     private lateinit var pickImage: Button
     private lateinit var clearImage: Button
     private lateinit var runInference: Button
+    private lateinit var analyzeRoom: Button
     private lateinit var status: TextView
+    private lateinit var timings: TextView
+    private lateinit var rawHeader: TextView
+    private lateinit var validatedHeader: TextView
+    private lateinit var validatedJson: TextView
     private lateinit var response: TextView
     private var selectedImage: Uri? = null
 
@@ -33,12 +40,18 @@ class MainActivity : Activity() {
         pickImage = findViewById(R.id.pick_image)
         clearImage = findViewById(R.id.clear_image)
         runInference = findViewById(R.id.run_inference)
+        analyzeRoom = findViewById(R.id.analyze_room)
         status = findViewById(R.id.status)
+        timings = findViewById(R.id.timings)
+        rawHeader = findViewById(R.id.raw_header)
+        validatedHeader = findViewById(R.id.validated_header)
+        validatedJson = findViewById(R.id.validated_json)
         response = findViewById(R.id.response)
 
         pickImage.setOnClickListener { openImagePicker() }
         clearImage.setOnClickListener { setSelectedImage(null) }
-        runInference.setOnClickListener { submit() }
+        runInference.setOnClickListener { submit(analysisMode = false) }
+        analyzeRoom.setOnClickListener { submit(analysisMode = true) }
     }
 
     @Suppress("DEPRECATION")
@@ -58,8 +71,15 @@ class MainActivity : Activity() {
     @Deprecated("Handles the platform file picker result.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_IMAGE && resultCode == RESULT_OK) {
-            data?.data?.let { setSelectedImage(it) }
+        if (requestCode != REQUEST_IMAGE) return
+        val image = data?.data
+        when {
+            resultCode != RESULT_OK -> status.setText(R.string.image_cancelled)
+            image == null -> status.setText(R.string.image_failed)
+            else -> {
+                setSelectedImage(image)
+                status.setText(R.string.ready)
+            }
         }
     }
 
@@ -69,53 +89,117 @@ class MainActivity : Activity() {
         clearImage.visibility = if (uri == null) View.GONE else View.VISIBLE
     }
 
-    private fun submit() {
-        val input = prompt.text.toString().trim()
+    private fun submit(analysisMode: Boolean) {
+        val image = selectedImage
+        if (analysisMode && image == null) {
+            status.setText(R.string.room_image_required)
+            return
+        }
+        val input = if (analysisMode) RoomAnalysisJson.prompt else prompt.text.toString().trim()
         if (input.isEmpty()) {
             prompt.error = getString(R.string.missing_prompt)
             return
         }
 
-        val image = selectedImage
         setInputEnabled(false)
         response.text = ""
-        status.setText(R.string.working)
+        timings.visibility = View.GONE
+        rawHeader.visibility = View.GONE
+        validatedHeader.visibility = View.GONE
+        validatedJson.visibility = View.GONE
+        status.setText(if (analysisMode) R.string.room_working else R.string.working)
         worker.execute {
-            val result = runCatching { runner.infer(input, image) }
+            val result = runCatching {
+                measureTimedValue {
+                    val inference = if (analysisMode) {
+                        runner.infer(
+                            input, image,
+                            maxOutputTokens = 768,
+                            responseFormat = ResponseFormat.json(RoomAnalysisJson.generationSchema),
+                        )
+                    } else {
+                        runner.infer(input, image)
+                    }
+                    val parsed = if (analysisMode) RoomAnalysisJson.parse(inference.rawResponse) else null
+                    val json = (parsed as? RoomAnalysisParseResult.Success)?.let {
+                        RoomAnalysisJson.encode(it.analysis)
+                    }
+                    RequestOutput(inference, parsed, json)
+                }
+            }
+            if (result.exceptionOrNull() is OutOfMemoryError) {
+                runCatching { runner.close() }
+            }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
 
                 setInputEnabled(true)
                 result.fold(
-                    onSuccess = { answer ->
-                        if (answer.isEmpty()) {
-                            status.setText(R.string.empty_response)
-                        } else {
-                            status.setText(R.string.completed)
-                            response.text = answer
-                        }
-                    },
-                    onFailure = { error ->
-                        status.text = when (error) {
-                            is GemmaRunner.Failure -> {
-                                error.detail?.let { getString(error.messageId, it) }
-                                    ?: getString(error.messageId)
-                            }
-                            is Exception, is LinkageError ->
-                                getString(R.string.inference_failed, error.javaClass.simpleName)
-                            else -> throw error
-                        }
-                    },
+                    onSuccess = { showOutput(it.value, it.duration.inWholeMilliseconds) },
+                    onFailure = { showError(it) },
                 )
             }
         }
     }
+
+    private fun showOutput(output: RequestOutput, totalMillis: Long) {
+        val inference = output.inference
+        response.text = inference.rawResponse
+        timings.text = getString(
+            R.string.request_timings,
+            inference.initializationMillis?.let { getString(R.string.duration_ms, it) }
+                ?: getString(R.string.engine_reused),
+            inference.imageMillis?.let { getString(R.string.duration_ms, it) }
+                ?: getString(R.string.no_image),
+            inference.inferenceMillis,
+            totalMillis,
+        )
+        timings.visibility = View.VISIBLE
+        if (output.parsed != null) rawHeader.visibility = View.VISIBLE
+        when (val parsed = output.parsed) {
+            null -> status.setText(if (inference.rawResponse.isBlank()) R.string.empty_response else R.string.completed)
+            is RoomAnalysisParseResult.Success -> {
+                status.setText(R.string.room_json_success)
+                validatedJson.text = output.validatedJson
+                validatedHeader.visibility = View.VISIBLE
+                validatedJson.visibility = View.VISIBLE
+            }
+            is RoomAnalysisParseResult.Failure -> {
+                val reason = when (parsed.kind) {
+                    RoomAnalysisParseResult.Failure.Kind.EMPTY -> R.string.empty_response
+                    RoomAnalysisParseResult.Failure.Kind.INVALID_JSON -> R.string.room_invalid_json
+                    RoomAnalysisParseResult.Failure.Kind.MISSING_FIELD -> R.string.room_missing_field
+                    RoomAnalysisParseResult.Failure.Kind.WRONG_TYPE -> R.string.room_wrong_type
+                    RoomAnalysisParseResult.Failure.Kind.UNSUPPORTED_VALUE -> R.string.room_unsupported_value
+                    RoomAnalysisParseResult.Failure.Kind.UNKNOWN_FIELD -> R.string.room_unknown_field
+                }
+                status.text = getString(R.string.room_json_error, parsed.path, getString(reason))
+            }
+        }
+    }
+
+    private fun showError(error: Throwable) {
+        status.text = when (error) {
+            is OutOfMemoryError -> getString(R.string.memory_failed)
+            is GemmaRunner.Failure -> error.detail?.let { getString(error.messageId, it) }
+                ?: getString(error.messageId)
+            is Exception, is LinkageError -> getString(R.string.inference_failed, error.javaClass.simpleName)
+            else -> throw error
+        }
+    }
+
+    private data class RequestOutput(
+        val inference: GemmaInference,
+        val parsed: RoomAnalysisParseResult?,
+        val validatedJson: String?,
+    )
 
     private fun setInputEnabled(enabled: Boolean) {
         prompt.isEnabled = enabled
         pickImage.isEnabled = enabled
         clearImage.isEnabled = enabled
         runInference.isEnabled = enabled
+        analyzeRoom.isEnabled = enabled
     }
 
     @Suppress("DEPRECATION")

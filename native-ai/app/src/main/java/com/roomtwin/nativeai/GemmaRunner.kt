@@ -10,44 +10,71 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ResponseFormat
 import com.google.ai.edge.litertlm.ThinkingConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.time.measureTimedValue
+
+internal data class GemmaInference(
+    val rawResponse: String,
+    val imageMillis: Long?,
+    val initializationMillis: Long?,
+    val inferenceMillis: Long,
+)
 
 // All calls are confined to the app's inference worker.
 internal class GemmaRunner(private val context: Context) : AutoCloseable {
     private var engine: Engine? = null
 
-    fun infer(prompt: String, imageUri: Uri?): String {
+    fun infer(
+        prompt: String,
+        imageUri: Uri?,
+        maxOutputTokens: Int = 256,
+        responseFormat: ResponseFormat? = null,
+    ): GemmaInference {
         val image = imageUri?.let { uri ->
             try {
-                readImage(uri)
+                measureTimedValue { readImage(uri) }
             } catch (error: Exception) {
                 throw Failure(R.string.image_failed, cause = error)
             }
         }
-        val activeEngine = getOrInitializeEngine()
+        val existingEngine = engine
+        val initialization = if (existingEngine == null) {
+            measureTimedValue { initializeEngine() }
+        } else {
+            null
+        }
+        val activeEngine = existingEngine ?: checkNotNull(initialization).value
         val input = buildList {
-            image?.let { add(Content.ImageBytes(it)) }
+            image?.let { add(Content.ImageBytes(it.value)) }
             add(Content.Text(prompt))
         }
-        return try {
-            activeEngine.createConversation(
-                ConversationConfig(
-                    maxOutputToken = 256,
-                    thinkingConfig = ThinkingConfig(enableThinking = false),
-                ),
-            ).use { conversation ->
-                conversation.sendMessage(Contents.of(input)).toString().trim()
+        val generation = try {
+            measureTimedValue {
+                activeEngine.createConversation(
+                    ConversationConfig(
+                        maxOutputToken = maxOutputTokens,
+                        enableResponseFormat = responseFormat != null,
+                        thinkingConfig = ThinkingConfig(enableThinking = false),
+                    ),
+                ).use { conversation ->
+                    conversation.sendMessage(Contents.of(input), responseFormat = responseFormat).toString()
+                }
             }
         } catch (error: Exception) {
             throw Failure(R.string.inference_failed, error.javaClass.simpleName, error)
         }
+        return GemmaInference(
+            generation.value,
+            image?.duration?.inWholeMilliseconds,
+            initialization?.duration?.inWholeMilliseconds,
+            generation.duration.inWholeMilliseconds,
+        )
     }
 
-    private fun getOrInitializeEngine(): Engine {
-        engine?.let { return it }
-
+    private fun initializeEngine(): Engine {
         val modelDirectory = context.getExternalFilesDir(null)
             ?: throw Failure(R.string.storage_unavailable)
         val model = File(modelDirectory, MODEL_NAME)

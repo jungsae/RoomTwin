@@ -1,0 +1,79 @@
+# JVM unit tests, debug APK, and Android Lint for native-ai.
+# This does not install Gemma weights and does not run a device.
+# Unity Editor and Galaxy S20+ checks stay outside this workflow.
+
+name: native-ai
+
+on:
+  pull_request:
+    paths:
+      - "native-ai/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "native-ai/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-ai-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-lint:
+    name: Unit tests, debug APK, and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: native-ai
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Require the Gradle project
+        run: |
+          if [ ! -f settings.gradle.kts ]; then
+            echo "native-ai/settings.gradle.kts is not in this checkout."
+            echo "origin/main currently publishes only the module README."
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build, unit test, and lint
+        run: |
+          echo "Device inference is not part of this job."
+          if [ -x ./gradlew ]; then
+            ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace
+          else
+            gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ai-reports
+          path: |
+            native-ai/app/build/reports/tests/
+            native-ai/app/build/reports/lint-results-debug.html
+            native-ai/app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore

@@ -45,6 +45,15 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Better scanning (depth fusion, meshing) if device evidence supports it
 - Export / share formats
 
+## Status note (numbers unchanged)
+
+The phase numbers above are kept. Two labels currently overlap, and this file does not renumber them:
+
+- The Phase 1 heading says Geometry, while its bullets still describe AR measurement capture.
+- Phase 2 is 3D room generation, and its last bullet is the Editor `GeometrySandbox` that has already been built.
+
+D-009 records the proposal. Device checks and Editor tests are not GitHub Actions results.
+
 ## Current Focus
 
-Editor room geometry in `GeometrySandbox`: four convex floor corners and a wall height, in room-local meters. AR raycast input, save/load, and furniture are not part of this slice. Phase 0 AR probe code stays as it is.
+`GeometrySandbox` is in `origin/main` at `69c80fa` and has been checked in the Unity Editor. Phase 0 AR probe behavior has a separate developer device check. AR raycast input into the room model, save/load, and furniture are still later work. Git workflow setup does not change those phases.

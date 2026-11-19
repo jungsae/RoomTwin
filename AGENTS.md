@@ -32,6 +32,22 @@
 - Do not invent "verified" device results;
   record assumptions in `docs/DECISIONS.md`.
 
+## Git Workflow
+
+- Track each development task with a GitHub issue.
+  Search open issues before creating one.
+- Implement on a feature branch, never on `main`.
+- Commit and push the feature branch after the
+  code change and its tests.
+- Open a draft pull request into `main`.
+  Record what passed and what was not run.
+- Link the issue with `Refs #`. Do not use
+  `Fixes` or `Closes` in the draft.
+- Do not merge into `main`, push `main`, or
+  force-push without an explicit user approval.
+- Do not edit another agent's worktree.
+- Procedure: `docs/DEVELOPMENT_WORKFLOW.md`.
+
 ## Documentation Index
 
 | Path | Responsibility |
@@ -41,6 +57,7 @@
 | `docs/ROADMAP.md` | Phased delivery order |
 | `docs/TEST_PLAN.md` | Verification strategy |
 | `docs/DECISIONS.md` | Decisions + verified vs assumed |
+| `docs/DEVELOPMENT_WORKFLOW.md` | Issue, branch, PR, and merge steps |
 | `.cursor/rules/*.mdc` | Cursor-only coding workflow |
 
 ## How to Use Docs

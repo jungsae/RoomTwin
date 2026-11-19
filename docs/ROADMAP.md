@@ -9,7 +9,7 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Establish empty module folders / asmdefs as needed
 - Editor mock room data path
 
-## Phase 1 — AR Measurement
+## Phase 1 — Geometry
 
 - Plane / raycast capture on device
 - Convert to meter estimates with uncertainty flags
@@ -20,6 +20,7 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Build floor + walls from measurements
 - Room-local coordinate frame
 - Visual preview in AR and/or free camera
+- Editor slice started: `GeometrySandbox` builds one convex quad (floor + four walls) without AR input
 
 ## Phase 3 — Manual Correction
 
@@ -46,4 +47,4 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 
 ## Current Focus
 
-Phase 0 (documentation done in this pass; package/code work is next when requested).
+Editor room geometry in `GeometrySandbox`: four convex floor corners and a wall height, in room-local meters. AR raycast input, save/load, and furniture are not part of this slice. Phase 0 AR probe code stays as it is.

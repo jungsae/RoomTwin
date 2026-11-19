@@ -40,13 +40,21 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Why**: A raycast hit lies on the ray through the touched pixel by construction, so a large reprojection error cannot come from bad plane estimation alone.
 - **Note**: AR Foundation normalizes the raycast point by `Screen.width/height`, while the reprojection uses the camera's pixel size. The HUD shows both values so a mismatch is visible. The 20 px tolerance and the floor-height range (0.2–2.5 m) are assumed values that have not been measured.
 
+## D-007 — Editor room mesh is a convex quad in room-local meters
+
+- **Status**: Accepted
+- **Decision**: `RoomGeometryData` stores four floor corners (`Vector2`, x = X, y = Z) and a wall height in meters. `RoomGeometryValidator` accepts only one convex quadrilateral and normalizes winding to counter-clockwise from above. `RoomMeshGenerator` then builds the floor with normals up and four walls with normals facing into the room. `RoomGeometryController` only applies that data in its local space.
+- **Why**: The mesh must be testable in the Editor without ARCore, and later raycast hits must be converted into this model instead of being stored as session poses.
+- **Note**: Concave polygons, more than four corners, JSON, and AR wiring are out of this slice. The 4 m × 3 m × 2.4 m example is a sample, not a measured room.
+
 ## Verified Facts (repo / local evidence)
 
 | Fact | Evidence |
 |------|----------|
 | Unity project is `6000.6.9f1` with URP + Input System | `RoomTwinScanner/ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json` |
-| AR Foundation / ARCore packages are not in the Unity manifest yet | `Packages/manifest.json` |
-| No RoomTwin feature gameplay scripts yet | `Assets/` has SampleScene + TutorialInfo only |
+| AR Foundation / ARCore 6.6.2 are in the Unity manifest | `Packages/manifest.json` |
+| Phase 0 probe and Editor room-geometry scripts are in `Assets/RoomTwin` | `ARPlaneProbe.unity`, `GeometrySandbox.unity` |
+| `GeometrySandbox` shows floor and walls, Inspector rebuilds after corner or height edits, rejects a bad corner order, and restores 4×3×2.4 m | Developer check in the Unity Editor on 2026-11-20 |
 | Android min SDK is 29; product name `RoomTwinScanner` `0.1.0` | `ProjectSettings.asset`; bootstrap sets the same value |
 | `native-ai/` exists as a separate module stub; Codex-owned | repo layout + root `AGENTS.md` |
 | AR Foundation samples cloned outside the repo | `C:\DigitalTwin\references\arfoundation-samples` |
@@ -62,7 +70,8 @@ Format: decision, status, context. Keep facts and assumptions separate.
 | Meshing / occlusion samples transfer cleanly into room reconstruction | Not evaluated on target devices | Optional post-MVP spike |
 | LiteRT-LM + Gemma 4 E2B integration shape for Unity bridge | Owned by Codex; contracts not published here | Wait for Codex interface doc |
 | Local JSON (or similar) is sufficient persistence | Format not chosen yet | Decide in Phase 4 |
-| Missing URP AR renderer features caused the S20+ black/blue screen and lag | Fix applied in assets, not yet re-run on device | Rebuild APK, compare with D-005 symptoms |
+| Missing URP AR renderer features caused the S20+ black/blue screen and lag | Fix applied in assets; later device checks are recorded separately by the developer | Compare a fresh device log if the camera background regresses |
+| Edit Mode `RoomTwin.Geometry.Tests` pass | Developer checked the sandbox in the Editor; Test Runner was not run | Run the Edit Mode assembly |
 | Binding `TrackedPoseDriver` to `<HandheldARInputDevice>/devicePosition` and `deviceRotation` fixes the camera stuck at the origin (scene had empty bindings; `Reset()` creates unbound actions) | Scene and bootstrap fixed; not re-run on device | Rebuild, then check that `camPos`/`camRot` change in `[RayCompare]` and that the screen-path reprojection error drops |
 | `ARInputManager` on the AR Session is required to start `XRInputSubsystem` for that pose | Bootstrap now adds one if missing; device not re-run | Confirm the component is on AR Session, then repeat the camera-pose check |
 | S20+ Phase 0 build ran on Vulkan | Graphics API is Automatic; runtime API not logged | Check `adb logcat` for the selected API |

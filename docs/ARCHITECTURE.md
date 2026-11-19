@@ -27,7 +27,7 @@ RoomTwin/
 |--------|----------------|
 | AR Session | AR Foundation session, plane/raycast input in session space |
 | Measurement Capture | Convert uncertain AR hits/planes into candidate dimensions (meters) |
-| Room Builder | Build editable room geometry from candidates |
+| Room Builder | Build editable room geometry from room-local meters. `RoomGeometryData` does not store AR session poses. |
 | Manual Correction | User edits length / height / corners |
 | Room Store | Serialize / deserialize room + furniture; never stores live session poses as truth |
 | Furniture Placement | Place preset furniture in room-local coordinates |
@@ -42,8 +42,8 @@ RoomTwin/
 
 - Project: `RoomTwinScanner` on Unity `6000.6.9f1`, URP, Input System
 - Android min SDK 29, product version `0.1.0`
-- AR Foundation / ARCore XR packages are **not yet** in `Packages/manifest.json`
-- No RoomTwin feature scripts yet (SampleScene + URP template only)
+- AR Foundation / ARCore are in `Packages/manifest.json`; Phase 0 probe scene is `ARPlaneProbe`
+- Editor room mesh lives in `GeometrySandbox` and does not reference the AR session
 
 ## Native AI Boundary
 

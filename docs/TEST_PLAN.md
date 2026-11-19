@@ -33,6 +33,14 @@
 4. Kill app / leave play mode, reload, and restore room + furniture.
 5. Report any failed tracking or large dimension error as known limitation.
 
+## Editor Room Geometry
+
+1. Open `Assets/RoomTwin/Scenes/GeometrySandbox.unity`. Do not enter Play mode yet. A 4 m × 3 m floor and 2.4 m walls should appear, with corner labels 1–4.
+2. On the `Room` object, change one corner or the wall height. The mesh rebuilds. The floor stays on y = 0 and the walls meet the new corners.
+3. Enter a crossed corner list, such as `(0,0), (4,3), (4,0), (0,3)`. The mesh clears and the Inspector shows a convex-order error.
+4. Run Edit Mode tests in Window > General > Test Runner. The `RoomTwin.Geometry.Tests` assembly covers winding, inward wall normals, clockwise input, and invalid corners.
+5. This scene has no AR Session. Phone and ARCore are not required.
+
 ## Phase 0 Touch Marker Alignment (device)
 
 1. RAYCAST mode: tap a textured floor or desk, hold the phone still, and read the HUD. The cyan touch cross and the magenta hit reprojection should overlap, with an error of 20 px or less.

@@ -107,7 +107,8 @@ namespace RoomTwin.EditorTools
             PlayerSettings.SetApplicationIdentifier(
                 NamedBuildTarget.Android,
                 "com.roomtwin.scanner");
-            PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
+            // ARCore Required + Vulkan needs API 29. Keep this equal to ProjectSettings.
+            PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel29;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(
                 NamedBuildTarget.Android,

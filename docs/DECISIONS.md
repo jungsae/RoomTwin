@@ -47,7 +47,7 @@ Format: decision, status, context. Keep facts and assumptions separate.
 | Unity project is `6000.6.9f1` with URP + Input System | `RoomTwinScanner/ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json` |
 | AR Foundation / ARCore packages are not in the Unity manifest yet | `Packages/manifest.json` |
 | No RoomTwin feature gameplay scripts yet | `Assets/` has SampleScene + TutorialInfo only |
-| Android min SDK is 26; product name `RoomTwinScanner` `0.1.0` | `ProjectSettings.asset` |
+| Android min SDK is 29; product name `RoomTwinScanner` `0.1.0` | `ProjectSettings.asset`; bootstrap sets the same value |
 | `native-ai/` exists as a separate module stub; Codex-owned | repo layout + root `AGENTS.md` |
 | AR Foundation samples cloned outside the repo | `C:\DigitalTwin\references\arfoundation-samples` |
 | Samples Editor last opened `Markers` scene | samples `Library/LastSceneManagerSetup.txt` |

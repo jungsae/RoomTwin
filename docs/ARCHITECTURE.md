@@ -41,7 +41,7 @@ RoomTwin/
 ## Unity Project Status (as of repo snapshot)
 
 - Project: `RoomTwinScanner` on Unity `6000.6.9f1`, URP, Input System
-- Android min SDK 26, product version `0.1.0`
+- Android min SDK 29, product version `0.1.0`
 - AR Foundation / ARCore XR packages are **not yet** in `Packages/manifest.json`
 - No RoomTwin feature scripts yet (SampleScene + URP template only)
 

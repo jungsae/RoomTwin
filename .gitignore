@@ -1,0 +1,18 @@
+# Android / Gradle
+.gradle/
+**/build/
+*.apk
+*.aab
+
+# AI Models
+*.litertlm
+*.gguf
+*.tflite
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/

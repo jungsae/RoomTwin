@@ -1,0 +1,17 @@
+---
+description: Cursor implementation workflow for RoomTwin
+alwaysApply: true
+---
+
+# Implementation Workflow
+
+1. Read `AGENTS.md`, then open only the docs needed for the task.
+2. Confirm scope against `docs/PRODUCT_SCOPE.md` before coding.
+3. Prefer the smallest change that advances the current roadmap phase.
+4. Do not modify `native-ai/` (Codex-owned). Document interface needs instead.
+5. Do not write feature code when the task is docs/rules only.
+6. Keep AR session state out of persistence models.
+7. After changes, state what was tested and what remains untested.
+8. Put new design decisions and assumptions in `docs/DECISIONS.md`.
+9. Prefer updating existing docs over creating parallel notes.
+10. Use Korean for developer-facing summaries; English for code and commits.

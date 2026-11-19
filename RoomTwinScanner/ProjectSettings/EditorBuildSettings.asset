@@ -6,7 +6,10 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/RoomTwin/Scenes/ARPlaneProbe.unity
+    guid: da8607cd722ff714caa73f1c3ab07985
   m_configObjects:
+    UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 1916bea4db40a41488d2c71a41bda757, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: b09c5eab74a4ad04eb6f27301ec398d7, type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 6ef31b83fbc36ea45be39321107fbe7d, type: 2}

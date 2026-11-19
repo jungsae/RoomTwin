@@ -1,0 +1,26 @@
+---
+description: Unity AR and room geometry implementation rules
+globs: RoomTwinScanner/Assets/**/*.cs
+alwaysApply: false
+---
+
+# Unity AR Rules
+
+- Target Unity 6.6 and Android ARCore via AR Foundation.
+- Use meters for all spatial measurements.
+- Treat ARCore plane and depth estimates as uncertain input, not ground truth.
+- Separate AR tracking / session coordinates from persisted room geometry.
+- Do not treat detected plane boundaries as accurate walls.
+- Prefer a room model that can be manually corrected after scan.
+- Keep geometry generation testable in the Unity Editor with mock data.
+- Preserve all Unity `.meta` files.
+- Report Editor tests and device/ARCore tests separately.
+- Leave `native-ai/` alone; consume only documented contracts.
+
+```csharp
+// ❌ BAD: persist live AR session poses as room truth
+room.Save(arPlane.transform.position);
+
+// ✅ GOOD: convert to room-local meters, then persist
+room.Save(ToRoomLocalMeters(arPlane));
+```

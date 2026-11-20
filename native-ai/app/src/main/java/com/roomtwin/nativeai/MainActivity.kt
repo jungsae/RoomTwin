@@ -10,13 +10,14 @@ import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
 import android.widget.TextView
-import com.google.ai.edge.litertlm.ResponseFormat
 import java.util.concurrent.Executors
 import kotlin.time.measureTimedValue
 
 class MainActivity : Activity() {
     private lateinit var runner: GemmaRunner
+    private lateinit var backends: RadioGroup
     private lateinit var prompt: EditText
     private lateinit var pickImage: Button
     private lateinit var clearImage: Button
@@ -48,6 +49,17 @@ class MainActivity : Activity() {
         validatedJson = findViewById(R.id.validated_json)
         response = findViewById(R.id.response)
 
+        backends = findViewById(R.id.backends)
+        backends.setOnCheckedChangeListener { _, id ->
+            val selected = if (id == R.id.gpu) InferenceBackend.GPU else InferenceBackend.CPU
+            worker.execute { runner.selectBackend(selected) }
+            status.setText(R.string.ready)
+            timings.visibility = View.GONE
+            response.text = ""
+            rawHeader.visibility = View.GONE
+            validatedHeader.visibility = View.GONE
+            validatedJson.visibility = View.GONE
+        }
         pickImage.setOnClickListener { openImagePicker() }
         clearImage.setOnClickListener { setSelectedImage(null) }
         runInference.setOnClickListener { submit(analysisMode = false) }
@@ -95,8 +107,8 @@ class MainActivity : Activity() {
             status.setText(R.string.room_image_required)
             return
         }
-        val input = if (analysisMode) RoomAnalysisJson.prompt else prompt.text.toString().trim()
-        if (input.isEmpty()) {
+        val input = prompt.text.toString().trim()
+        if (!analysisMode && input.isEmpty()) {
             prompt.error = getString(R.string.missing_prompt)
             return
         }
@@ -112,11 +124,7 @@ class MainActivity : Activity() {
             val result = runCatching {
                 measureTimedValue {
                     val inference = if (analysisMode) {
-                        runner.infer(
-                            input, image,
-                            maxOutputTokens = 768,
-                            responseFormat = ResponseFormat.json(RoomAnalysisJson.generationSchema),
-                        )
+                        runner.analyzeRoom(checkNotNull(image))
                     } else {
                         runner.infer(input, image)
                     }
@@ -153,6 +161,7 @@ class MainActivity : Activity() {
                 ?: getString(R.string.no_image),
             inference.inferenceMillis,
             totalMillis,
+            inference.backend.name,
         )
         timings.visibility = View.VISIBLE
         if (output.parsed != null) rawHeader.visibility = View.VISIBLE
@@ -195,6 +204,7 @@ class MainActivity : Activity() {
     )
 
     private fun setInputEnabled(enabled: Boolean) {
+        for (index in 0 until backends.childCount) backends.getChildAt(index).isEnabled = enabled
         prompt.isEnabled = enabled
         pickImage.isEnabled = enabled
         clearImage.isEnabled = enabled

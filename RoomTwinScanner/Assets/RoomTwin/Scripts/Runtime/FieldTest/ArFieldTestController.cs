@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -53,7 +54,7 @@ namespace RoomTwin.AR
         readonly FloorCornerCapture capture = new FloorCornerCapture();
         readonly StringBuilder logBuilder = new StringBuilder(512);
         readonly List<WallCornerSolver.FloorSample> floorSamples = new List<WallCornerSolver.FloorSample>(8);
-        readonly List<Vector3> verticalNormals = new List<Vector3>(8);
+        readonly List<DetectedWall> verticalWalls = new List<DetectedWall>(8);
         ArScanHud hud;
         ArScanWallOutlines outlines;
         string highlightedSelected = string.Empty;
@@ -77,45 +78,85 @@ namespace RoomTwin.AR
         public float FloorHeightToleranceMeters => floorHeightToleranceMeters;
         public bool HasReferenceFloorY => capture.HasReferenceFloorY;
         public float ReferenceFloorY => capture.ReferenceFloorY;
+        public bool ControllerInitSucceeded { get; private set; }
+        public bool HudReady => hud != null && hud.IsReady;
+        public bool UsingEmergencyHud { get; private set; }
 
         void Awake()
         {
-            if (raycastManager == null)
+            try
             {
-                raycastManager = FindFirstObjectByType<ARRaycastManager>();
+                if (raycastManager == null)
+                {
+                    raycastManager = FindFirstObjectByType<ARRaycastManager>();
+                }
+
+                if (planeManager == null)
+                {
+                    planeManager = FindFirstObjectByType<ARPlaneManager>();
+                }
+
+                if (arSession == null)
+                {
+                    arSession = FindFirstObjectByType<ARSession>();
+                }
+
+                if (arCamera == null)
+                {
+                    arCamera = Camera.main;
+                }
+
+                sessionRoot = raycastManager != null ? raycastManager.transform : transform;
+                capture.HeightToleranceMeters = floorHeightToleranceMeters;
+                outlines = GetComponent<ArScanWallOutlines>();
+                if (outlines == null)
+                {
+                    outlines = gameObject.AddComponent<ArScanWallOutlines>();
+                }
+
+                ControllerInitSucceeded = true;
+                Debug.Log(LogTag + " controller-init=success");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                Debug.LogError(LogTag + " controller-init=failure " + ex.GetType().Name + ": " + ex.Message);
+                return;
             }
 
-            if (planeManager == null)
-            {
-                planeManager = FindFirstObjectByType<ARPlaneManager>();
-            }
+            InitializeHud();
+        }
 
-            if (arSession == null)
+        void InitializeHud()
+        {
+            try
             {
-                arSession = FindFirstObjectByType<ARSession>();
-            }
+                hud = GetComponent<ArScanHud>();
+                if (hud == null)
+                {
+                    hud = gameObject.AddComponent<ArScanHud>();
+                }
 
-            if (arCamera == null)
+                if (!hud.TryInitialize(out _))
+                {
+                    UsingEmergencyHud = true;
+                    return;
+                }
+
+                hud.BindReset(ResetCapture);
+                RefreshPresentation();
+            }
+            catch (Exception ex)
             {
-                arCamera = Camera.main;
-            }
+                Debug.LogException(ex);
+                Debug.LogError(LogTag + " hud-init=failure " + ex.GetType().Name + ": " + ex.Message);
+                if (hud != null)
+                {
+                    hud.CleanupFailedBuild();
+                }
 
-            sessionRoot = raycastManager != null ? raycastManager.transform : transform;
-            capture.HeightToleranceMeters = floorHeightToleranceMeters;
-            hud = GetComponent<ArScanHud>();
-            if (hud == null)
-            {
-                hud = gameObject.AddComponent<ArScanHud>();
+                UsingEmergencyHud = true;
             }
-
-            outlines = GetComponent<ArScanWallOutlines>();
-            if (outlines == null)
-            {
-                outlines = gameObject.AddComponent<ArScanWallOutlines>();
-            }
-
-            hud.BindReset(ResetCapture);
-            RefreshPresentation();
         }
 
         void OnEnable()
@@ -674,33 +715,42 @@ namespace RoomTwin.AR
             }
         }
 
-        void RefreshPresentation()
+        void OnGUI()
         {
-            if (hud == null)
+            if (!UsingEmergencyHud)
             {
                 return;
             }
 
-            bool floorReady = capture.HasReferenceFloorY || FloorCanBeChosen();
+            GUI.Label(new Rect(24f, 24f, Screen.width - 48f, 120f), "HUD failed. " + status);
+            if (GUI.Button(new Rect(24f, 160f, 220f, 72f), "Reset"))
+            {
+                ResetCapture();
+            }
+        }
+
+        void RefreshPresentation()
+        {
+            CollectFloorSamples();
+            bool floorChosen = WallCornerSolver.TryChooseFloorY(
+                floorSamples, floorHeightToleranceMeters, out float candidateFloorY, out _);
+            bool floorReady = capture.HasReferenceFloorY || floorChosen;
             var snapshot = new ScanSnapshot
             {
                 IsTracking = ARSession.state == ARSessionState.SessionTracking,
                 FloorLocked = floorReady,
-                FloorUncertain = !capture.HasReferenceFloorY && !floorReady && floorSamples.Count > 0,
+                FloorUncertain = !capture.HasReferenceFloorY && !floorChosen && floorSamples.Count > 0,
                 VerticalWallCount = CountVerticalWalls(),
-                HasIntersectablePair = HasIntersectableWallPair(),
+                HasIntersectablePair = HasSolverValidPair(),
                 CornerCount = capture.Count,
                 RoomBuilt = meshBuilt
             };
             string failure = string.IsNullOrEmpty(lastRejection) ? null : ScanFeedback.ToKorean(lastRejection);
-            hud.Apply(snapshot, failure, null);
+            if (hud != null && hud.IsReady)
+            {
+                hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
+            }
             outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil);
-        }
-
-        bool FloorCanBeChosen()
-        {
-            CollectFloorSamples();
-            return WallCornerSolver.TryChooseFloorY(floorSamples, floorHeightToleranceMeters, out _, out _);
         }
 
         void CollectFloorSamples()
@@ -745,27 +795,28 @@ namespace RoomTwin.AR
             return count;
         }
 
-        bool HasIntersectableWallPair()
+        bool HasSolverValidPair()
         {
-            verticalNormals.Clear();
-            if (planeManager == null)
+            if (planeManager == null || !TryResolveFloorY(out float floorY, out _))
             {
                 return false;
             }
 
+            verticalWalls.Clear();
             foreach (ARPlane plane in planeManager.trackables)
             {
                 if (plane.alignment == PlaneAlignment.Vertical)
                 {
-                    verticalNormals.Add(plane.normal);
+                    verticalWalls.Add(ToWall(plane));
                 }
             }
 
-            for (int i = 0; i < verticalNormals.Count; i++)
+            for (int i = 0; i < verticalWalls.Count; i++)
             {
-                for (int j = i + 1; j < verticalNormals.Count; j++)
+                for (int j = i + 1; j < verticalWalls.Count; j++)
                 {
-                    if (Vector3.Cross(verticalNormals[i], verticalNormals[j]).magnitude >= WallCornerSolver.MinNormalCrossMagnitude)
+                    if (WallCornerSolver.TryPair(verticalWalls[i], verticalWalls[j], floorY, out WallCornerEstimate estimate)
+                        && estimate.Accepted)
                     {
                         return true;
                     }
@@ -773,6 +824,40 @@ namespace RoomTwin.AR
             }
 
             return false;
+        }
+
+        string BuildDebugText(float candidateFloorY, bool floorChosen)
+        {
+            logBuilder.Clear();
+            logBuilder.Append("Tracking: ").Append(ARSession.state);
+            logBuilder.Append("\nFloor locked Y: ");
+            if (capture.HasReferenceFloorY)
+            {
+                logBuilder.Append(capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                logBuilder.Append("no");
+            }
+
+            logBuilder.Append("\nFloor candidate Y: ");
+            logBuilder.Append(floorChosen
+                ? candidateFloorY.ToString("0.000", CultureInfo.InvariantCulture)
+                : "not chosen");
+            logBuilder.Append("\nFloor samples:");
+            for (int i = 0; i < floorSamples.Count; i++)
+            {
+                logBuilder.Append("\n  y=");
+                logBuilder.Append(floorSamples[i].Height.ToString("0.000", CultureInfo.InvariantCulture));
+                logBuilder.Append(" area=");
+                logBuilder.Append(floorSamples[i].AreaSquareMeters.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            logBuilder.Append("\nVertical walls: ").Append(CountVerticalWalls());
+            logBuilder.Append("\nCorners: ").Append(capture.Count).Append("/4");
+            logBuilder.Append("\nLast failure: ");
+            logBuilder.Append(string.IsNullOrEmpty(lastRejection) ? "none" : lastRejection);
+            return logBuilder.ToString();
         }
 
         static bool TryGetPressScreenPosition(out Vector2 screenPosition)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -64,7 +65,7 @@ namespace RoomTwin.Geometry.Tests
         [Test]
         public void MissingFloor_DoesNotLockACorner()
         {
-            bool chosen = WallCornerSolver.TryChooseFloorY(null, 0.12f, out _, out string error);
+            bool chosen = WallCornerSolver.TryChooseFloorY((IReadOnlyList<float>)null, 0.12f, out _, out string error);
 
             Assert.IsFalse(chosen);
             StringAssert.Contains("floor", error);

@@ -1,0 +1,20 @@
+{
+    "name": "RoomTwin.FieldTest.PlayModeTests",
+    "rootNamespace": "RoomTwin.AR.PlayModeTests",
+    "references": [
+        "RoomTwin.FieldTest",
+        "RoomTwin.Geometry"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

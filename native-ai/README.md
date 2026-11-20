@@ -34,7 +34,24 @@ adb shell mv /sdcard/Android/data/com.roomtwin.nativeai/files/gemma-4-E2B-it.lit
 adb shell am start -n com.roomtwin.nativeai/.MainActivity
 ```
 
-앱에서 짧은 질문을 입력하고 **추론 실행**을 누른다. 첫 요청에 모델을 로드한다. 이미지 추론은 **이미지 선택**에서 사진 한 장을 고른 뒤 질문을 입력하고 실행한다. 앱이 선택한 파일을 기기에서 읽을 수 있어야 한다.
+앱 상단의 **Room Analysis**에서 기존 실내 분석을 실행하거나 **Playground**에서 자유 대화를 시작한다. 실행할 백엔드와 컨텍스트 설정으로 첫 요청을 보낼 때 모델을 로드한다. 앱이 선택한 사진을 기기에서 읽을 수 있어야 한다.
+
+## 오프라인 Playground
+
+1. **Playground**에서 한국어 또는 영어로 메시지를 보낸다. 같은 대화를 유지하면서 후속 질문을 보낼 수 있으며 일반 답변 텍스트는 생성되는 동안 표시된다.
+2. **카메라**로 촬영하거나 **갤러리**에서 기기에 저장된 사진을 고른다. 미리보기에서 사진을 확인한 뒤 질문을 함께 보낸다. 사진을 한 번 보낸 다음에는 같은 사진에 대해 텍스트로 질문을 이어갈 수 있다. 다른 사진은 **새 대화**에서 첨부한다.
+3. **생성 설정**에서 시스템 프롬프트, Temperature (0–2), Top-K (1–64), Top-P (0–1), 최대 출력 토큰 (1–1024), 컨텍스트 길이 (2048·4096·8192), CPU/GPU, Thinking을 설정할 수 있다. 기본 컨텍스트는 2048, 기본 백엔드는 CPU이며 Thinking은 꺼져 있다. 컨텍스트를 늘리면 메모리 사용량이 늘어날 수 있다. 출력 토큰 한도에는 Thinking 토큰이 포함될 수 있다. [LiteRT-LM 0.19.0 Kotlin 설정](https://github.com/google-ai-edge/LiteRT-LM/blob/v0.19.0/kotlin/java/com/google/ai/edge/litertlm/Config.kt)
+4. **새 대화**를 누르거나 생성 설정을 변경하면 Playground 문맥이 초기화된다. 현재 대화를 마친 뒤 Room Analysis로 전환할 때도 초기화를 확인한다. 화면 재생성 시에는 새 세션을 시작한다. 실내 분석은 기존 2048 컨텍스트, JSON 스키마와 프롬프트를 사용한다.
+
+한 세션에서 사진 한 장을 사용한다. Thinking 채널은 화면에 표시하지 않는다. 이미지 준비와 모델 실행은 작업 스레드에서 처리한다. 텍스트와 이미지 질문 모두 기기의 모델 파일을 사용한다.
+
+## Vision Lab
+
+같은 오프라인 모델로 장면 이해·시각 추론·변화 감지·객체 위치 추론·이미지 번역·공간 분석을 실험할 수 있다. [Vision Lab 사용법과 지원 범위](docs/VISION_LAB.md)
+
+## Benchmark Lab
+
+CPU/GPU 반복 실행, 컨텍스트·시각 평가, 지연·토큰·시스템 자원 관측을 지원한다. 앱에서 세션을 조회하고 JSONL이나 CSV로 내보낼 수 있다. [실험 조건과 측정 기준](docs/BENCHMARK_LAB.md)
 
 ## 실내 사진 분석
 
@@ -42,7 +59,7 @@ adb shell am start -n com.roomtwin.nativeai/.MainActivity
 2. **이미지 선택**에서 기기에 저장된 실내 사진 한 장을 고른다.
 3. **실내 사진 분석 · JSON**을 누른다. 앱이 실내 분석용 프롬프트를 자동으로 사용한다.
 4. 결과에서 초기화·이미지 전처리·추론·전체 소요 시간, 원본 모델 응답, JSON 검증 상태를 확인한다. 검증에 성공하면 **검증된 JSON**이 원본 아래에 표시된다.
-5. 자유 질문은 기존 **추론 실행**을 사용한다. 이미지를 제거하면 텍스트만 입력할 수 있다.
+5. 자유 질문은 상단의 **Playground**에서 보낸다.
 
 필드와 오류 처리 기준은 [JSON 스키마 1.0](ROOM_ANALYSIS_SCHEMA.md)을 참조한다.
 
@@ -50,7 +67,7 @@ adb shell am start -n com.roomtwin.nativeai/.MainActivity
 
 ```sh
 cd native-ai
-gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+gradle :app:testDebugUnitTest :bridge:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
 이 명령은 JSON 호스트 단위 테스트, APK 빌드, Android Lint를 실행한다. 실기기 추론은 아래 절차로 확인한다.
@@ -94,3 +111,5 @@ Galaxy S20+에서 침실·거실·주방 사진과 침실 반복 입력이 모�
 S20+에서 CPU·GPU를 비교한 결과, 오프라인 검증 범위와 별도 패키지로 재현하는 방법은 [하드웨어 가속 벤치마크](docs/ACCELERATION_BENCHMARK.md)를 참조한다. NPU, 오디오 입력, Unity 연결은 후속 범위다.
 
 실내 사진에서 가구와 벽이 겹칠 때의 인식 품질, 기존·후보 프롬프트 비교 및 재현은 [실내 가구·벽 가림 인식 평가](docs/ROOM_OCCLUSION_EVALUATION.md)를 참조한다.
+
+공유 Android Library는 `:bridge`에 있다. 별도 AAR 빌드, Unity 호출 계약, 호스트에서의 패키징 검증 절차는 [Unity–Native AI 통합 계약](docs/UNITY_INTEGRATION_CONTRACT.md)을 참조한다.

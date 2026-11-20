@@ -1,10 +1,7 @@
-# JVM unit tests, debug APK, and Android Lint for native-ai.
+# Host tests, Android builds, lint, and local Maven consumption for native-ai.
 # This does not install Gemma weights and does not run a device.
 # Unity Editor and Galaxy S20+ checks stay outside this workflow.
-# This file runs only after it is on the pull request's base or head.
-# feat/native-ai (PR #2) does not contain it, so that PR will not run
-# this job until the workflow is on main. There is no Gradle wrapper;
-# the job uses Gradle 9.3.1 from the setup action.
+# The job uses Gradle 9.3.1 from the setup action when there is no wrapper.
 
 name: native-ai
 
@@ -28,7 +25,7 @@ concurrency:
 
 jobs:
   build-test-lint:
-    name: Unit tests, debug APK, and lint
+    name: App and Bridge build, test, lint, and Maven verification
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -42,7 +39,6 @@ jobs:
         run: |
           if [ ! -f settings.gradle.kts ]; then
             echo "native-ai/settings.gradle.kts is not in this checkout."
-            echo "origin/main currently publishes only the module README."
             exit 1
           fi
 
@@ -65,14 +61,22 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Build, unit test, and lint
+      - name: Verify app and Bridge builds
         run: |
-          echo "Device inference is not part of this job."
+          gradle_command=gradle
           if [ -x ./gradlew ]; then
-            ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace
-          else
-            gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --stacktrace
+            gradle_command=./gradlew
           fi
+
+          "$gradle_command" --stacktrace \
+            :app:testDebugUnitTest :app:assembleDebug :app:lintDebug \
+            :bridge:testDebugUnitTest :bridge:assembleRelease :bridge:lintRelease
+
+          "$gradle_command" --stacktrace :bridge:publishReleasePublicationToUnityRepository
+
+          # Resolve the Bridge from the published Maven coordinates in a separate build.
+          "$gradle_command" --stacktrace -PusePublishedBridge=true \
+            :app:assembleDebug :app:assembleField
 
       - name: Upload reports
         if: always()
@@ -83,4 +87,8 @@ jobs:
             native-ai/app/build/reports/tests/
             native-ai/app/build/reports/lint-results-debug.html
             native-ai/app/build/reports/lint-results-debug.xml
+            native-ai/bridge/build/reports/tests/
+            native-ai/bridge/build/test-results/testDebugUnitTest/TEST-*.xml
+            native-ai/bridge/build/reports/lint-results-release.html
+            native-ai/bridge/build/reports/lint-results-release.xml
           if-no-files-found: ignore

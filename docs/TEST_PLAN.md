@@ -52,17 +52,19 @@ adb shell ls /sdcard/Android/data/com.roomtwin.scanner/files/Logs
 adb pull /sdcard/Android/data/com.roomtwin.scanner/files/Logs
 ```
 
-Each `planes` snapshot can be read back by a reconstruction test. It stores plane id, alignment, center, normal, and area.
+Each `snapshot` line can be replayed into `WallObservation` values. A plane stores id, alignment, center, normal, position, axes, extents, area, tracking, subsumed, and up to 12 boundary points. `clusters` stores kept and discarded wall ids. Estimated edge lengths are not survey measurements.
 
-## AR Field Test v0.1
+## AR Field Test reconstruction
 
-Not a survey. The user taps four floor points. ARCore does not detect the real wall corners, and a raycast can miss outside a detected plane.
+Not a survey. A tap selects a wall cluster. The corner is the intersection of observed walls and the floor height, not the touch point.
 
 1. Build `Assets/RoomTwin/Scenes/ARFieldTest.unity` with `RoomTwin/FieldTest/Build Android APK`.
-2. On the phone, wait for Tracking and at least one horizontal floor.
-3. Tap four floor corners in boundary order. Read edge lengths from `[RoomTwin][FieldTest] edges-horizontal-m` and compare them with a tape.
-4. Walk sideways. The mesh stays on the floor while the camera moves.
-5. Tap Reset and repeat. A crossed or too-close selection must not build a mesh.
+2. On the phone, wait until tracking returns after a new scan. Corner confirmation stays blocked until `SessionTracking`.
+3. Show the floor, then tap the walls that should bound the room. A closed outline appears as small numbered candidate markers. `확정` builds the transparent mesh. `취소` drops the last wall selection and keeps the scan. `새 스캔` calls `ARSession.Reset` and starts a new JSONL file.
+4. Read `[RoomTwin][FieldTest] edges-horizontal-m` and the JSONL `geometry` line. Compare with a tape only after one is measured. Do not treat the estimate as the room size.
+5. Pull logs with the `adb pull` command above. The developer panel can copy the latest file to `latest-scan.jsonl` or delete saved logs. At most 12 session files are kept.
+
+Edit Mode coverage lives in `RoomReconstructionTests` and `ScanSessionLogTests`. Those tests were added with this change and were not executed in the agent session. Do not mark them passed until Test Runner runs them.
 
 Editor checks for the coordinate mapping are in `FieldTestFrameTests`. They do not replace the device pass.
 

@@ -25,6 +25,7 @@ namespace RoomTwin.AR
         RectTransform bottomBar;
         RectTransform resetButton;
         RectTransform undoButton;
+        RectTransform confirmButton;
         RectTransform developerButton;
         RectTransform debugPanel;
         Text headline;
@@ -154,6 +155,16 @@ namespace RoomTwin.AR
             undoButton.GetComponent<Button>().onClick.AddListener(action);
         }
 
+        public void BindConfirm(UnityAction action)
+        {
+            if ((!IsReady && !TryInitialize(out _)) || confirmButton == null || action == null)
+            {
+                return;
+            }
+
+            confirmButton.GetComponent<Button>().onClick.AddListener(action);
+        }
+
         public void SetDeveloperVisible(bool visible)
         {
             developerVisible = visible;
@@ -182,6 +193,7 @@ namespace RoomTwin.AR
                 || Contains(bottomBar, screenPoint)
                 || Contains(resetButton, screenPoint)
                 || Contains(undoButton, screenPoint)
+                || Contains(confirmButton, screenPoint)
                 || Contains(developerButton, screenPoint)
                 || (developerVisible && Contains(debugPanel, screenPoint));
         }
@@ -207,6 +219,7 @@ namespace RoomTwin.AR
             bottomBar = null;
             resetButton = null;
             undoButton = null;
+            confirmButton = null;
             developerButton = null;
             debugPanel = null;
             if (canvasObject != null)
@@ -254,6 +267,8 @@ namespace RoomTwin.AR
             resetButton = CreateButton(safeRoot, font, "새 스캔", 28);
             undoButton = CreateButton(safeRoot, font, "취소", 28);
             undoButton.anchoredPosition = new Vector2(-24f - ButtonSize - 16f, 24f);
+            confirmButton = CreateButton(safeRoot, font, "확정", 28);
+            confirmButton.anchoredPosition = new Vector2(-24f, 24f + ButtonSize + 12f);
             developerButton = CreateButton(safeRoot, font, "개발", 26);
             developerButton.anchorMin = new Vector2(0f, 0f);
             developerButton.anchorMax = new Vector2(0f, 0f);

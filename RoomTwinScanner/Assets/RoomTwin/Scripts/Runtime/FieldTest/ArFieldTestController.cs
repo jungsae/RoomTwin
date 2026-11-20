@@ -55,7 +55,15 @@ namespace RoomTwin.AR
         readonly FloorCornerCapture capture = new FloorCornerCapture();
         readonly StringBuilder logBuilder = new StringBuilder(512);
         readonly List<WallCornerSolver.FloorSample> floorSamples = new List<WallCornerSolver.FloorSample>(8);
-        readonly List<DetectedWall> verticalWalls = new List<DetectedWall>(8);
+        readonly List<FloorObservation> floorObservations = new List<FloorObservation>(8);
+        readonly List<float> wallBottoms = new List<float>(8);
+        readonly List<WallObservation> wallObservations = new List<WallObservation>(16);
+        readonly List<string> intendedPlaneIds = new List<string>(8);
+        readonly List<string> requiredClusterIds = new List<string>(4);
+        readonly Dictionary<string, float> firstSeenAt = new Dictionary<string, float>(32);
+        readonly WallClusterBuilder wallClusters = new WallClusterBuilder();
+        readonly FloorHeightEstimator floorEstimator = new FloorHeightEstimator();
+        readonly RoomReconstructionSolver reconstructionSolver = new RoomReconstructionSolver();
         ArScanHud hud;
         ArScanWallOutlines outlines;
         readonly List<string> visibleWallIds = new List<string>(8);
@@ -65,6 +73,10 @@ namespace RoomTwin.AR
         bool waitingForRescan;
         float nextSnapshotTime;
         string logStatus = "starting";
+        WallClusterSettings clusterSettings = WallClusterSettings.CreateDefault();
+        Vector3[] previewCorners;
+        string[] previewWallIds;
+        bool previewReady;
         float pulseUntil;
         float presentationTimer;
         Transform pulseMarker;
@@ -152,6 +164,7 @@ namespace RoomTwin.AR
 
                 hud.BindReset(StartNewScan);
                 hud.BindUndo(UndoLastCorner);
+                hud.BindConfirm(ConfirmPreview);
                 hud.BindLogActions(ExportLog, DeleteLogs);
                 RefreshPresentation();
             }
@@ -231,7 +244,8 @@ namespace RoomTwin.AR
                 ",\"cameraEuler\":" + JsonVector(euler) +
                 ",\"verticalWalls\":" + CountVerticalWalls().ToString(CultureInfo.InvariantCulture) +
                 ",\"corners\":" + capture.Count.ToString(CultureInfo.InvariantCulture) +
-                ",\"planes\":" + PlaneSnapshotJson());
+                ",\"planes\":" + PlaneSnapshotJson() +
+                ",\"clusters\":" + ClusterSnapshotJson());
         }
 
         string PlaneSnapshotJson()
@@ -256,12 +270,78 @@ namespace RoomTwin.AR
                 builder.Append(",\"alignment\":").Append(ScanSessionLog.Quote(plane.alignment.ToString()));
                 builder.Append(",\"center\":").Append(JsonVector(plane.center));
                 builder.Append(",\"normal\":").Append(JsonVector(plane.normal));
+                builder.Append(",\"position\":").Append(JsonVector(plane.transform.position));
+                builder.Append(",\"axisU\":").Append(JsonVector(plane.transform.right));
+                builder.Append(",\"axisV\":").Append(JsonVector(plane.transform.forward));
+                builder.Append(",\"extents\":").Append(string.Format(CultureInfo.InvariantCulture, "[{0:0.000},{1:0.000}]", plane.extents.x, plane.extents.y));
                 builder.Append(",\"area\":").Append((plane.size.x * plane.size.y).ToString("0.00", CultureInfo.InvariantCulture));
-                builder.Append('}');
+                builder.Append(",\"tracking\":").Append(ScanSessionLog.Quote(plane.trackingState.ToString()));
+                builder.Append(",\"subsumed\":").Append(plane.subsumedBy != null ? "true" : "false");
+                builder.Append(",\"boundary\":[");
+                if (plane.boundary.IsCreated)
+                {
+                    int limit = plane.boundary.Length < 12 ? plane.boundary.Length : 12;
+                    for (int i = 0; i < limit; i++)
+                    {
+                        if (i > 0)
+                        {
+                            builder.Append(',');
+                        }
+
+                        builder.Append(string.Format(CultureInfo.InvariantCulture, "[{0:0.000},{1:0.000}]", plane.boundary[i].x, plane.boundary[i].y));
+                    }
+                }
+
+                builder.Append("]}");
             }
 
             builder.Append(']');
             return builder.ToString();
+        }
+
+        string ClusterSnapshotJson()
+        {
+            var builder = new StringBuilder(256);
+            builder.Append("{\"kept\":[");
+            AppendClusters(builder, wallClusters.Clusters, false);
+            builder.Append("],\"discarded\":[");
+            AppendClusters(builder, wallClusters.Discarded, true);
+            builder.Append("]}");
+            return builder.ToString();
+        }
+
+        static void AppendClusters(StringBuilder builder, List<WallCluster> clusters, bool includeReason)
+        {
+            for (int i = 0; i < clusters.Count; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(',');
+                }
+
+                WallCluster cluster = clusters[i];
+                builder.Append("{\"id\":").Append(ScanSessionLog.Quote(cluster.Id));
+                builder.Append(",\"confidence\":").Append(cluster.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
+                builder.Append(",\"area\":").Append(cluster.AreaSquareMeters.ToString("0.00", CultureInfo.InvariantCulture));
+                builder.Append(",\"members\":[");
+                for (int m = 0; m < cluster.MemberIds.Count; m++)
+                {
+                    if (m > 0)
+                    {
+                        builder.Append(',');
+                    }
+
+                    builder.Append(ScanSessionLog.Quote(cluster.MemberIds[m]));
+                }
+
+                builder.Append(']');
+                if (includeReason)
+                {
+                    builder.Append(",\"reason\":").Append(ScanSessionLog.Quote(cluster.DiscardReason));
+                }
+
+                builder.Append('}');
+            }
         }
 
         static string JsonVector(Vector3 value)
@@ -328,21 +408,71 @@ namespace RoomTwin.AR
 
         public void UndoLastCorner()
         {
-            if (!capture.UndoLast())
+            if (meshBuilt)
             {
-                status = "취소할 모서리가 없습니다.";
+                meshBuilt = false;
+                capture.Reset();
+                DestroyChild(roomAnchor);
+                roomAnchor = null;
+                previewReady = false;
+                status = "만든 방 메시를 취소했습니다. 스캔 데이터는 유지됩니다.";
+                sessionLog?.Write("undo", "\"mesh\":false");
+                RefreshPresentation();
                 return;
             }
 
-            meshBuilt = false;
-            DestroyChild(roomAnchor);
-            roomAnchor = null;
-            RemoveLastMarker();
+            if (intendedPlaneIds.Count == 0)
+            {
+                status = "취소할 벽 선택이 없습니다.";
+                return;
+            }
+
+            intendedPlaneIds.RemoveAt(intendedPlaneIds.Count - 1);
+            capture.Reset();
+            previewReady = false;
+            previewCorners = null;
+            ClearChildren(markerRoot);
             lastRejection = string.Empty;
-            status = "마지막 모서리 추정을 취소했습니다. 스캔 데이터는 유지됩니다.";
-            sessionLog?.Write("undo", "\"corners\":" + capture.Count.ToString(CultureInfo.InvariantCulture));
-            Debug.Log(LogTag + " undo corners=" + capture.Count);
+            status = "마지막 벽 선택을 취소했습니다. 스캔 데이터는 유지됩니다.";
+            sessionLog?.Write("undo", "\"intended\":" + intendedPlaneIds.Count.ToString(CultureInfo.InvariantCulture));
+            Debug.Log(LogTag + " undo intended=" + intendedPlaneIds.Count);
             RefreshPresentation();
+        }
+
+        public void ConfirmPreview()
+        {
+            if (!previewReady || previewCorners == null || previewCorners.Length != 4)
+            {
+                status = "확정할 방 윤곽이 없습니다. 벽을 더 비춰 주세요.";
+                return;
+            }
+
+            if (waitingForRescan || ARSession.state != ARSessionState.SessionTracking)
+            {
+                Reject("AR tracking is not ready. Wait before confirming a corner.");
+                return;
+            }
+
+            capture.Reset();
+            for (int i = 0; i < previewCorners.Length; i++)
+            {
+                if (!capture.TryAdd(previewCorners[i], out string rejection))
+                {
+                    capture.Reset();
+                    Reject(rejection);
+                    return;
+                }
+            }
+
+            ClearChildren(markerRoot);
+            EnsureMarkerRoot();
+            for (int i = 0; i < previewCorners.Length; i++)
+            {
+                CreateMarker(i + 1, previewCorners[i], false);
+            }
+
+            sessionLog?.Write("confirm", "\"corners\":4");
+            BuildRoom();
         }
 
         public void StartNewScan()
@@ -380,18 +510,15 @@ namespace RoomTwin.AR
             highlightedSelected = string.Empty;
             highlightedOther = string.Empty;
             visibleWallIds.Clear();
+            intendedPlaneIds.Clear();
+            requiredClusterIds.Clear();
+            firstSeenAt.Clear();
+            previewCorners = null;
+            previewWallIds = null;
+            previewReady = false;
+            wallObservations.Clear();
             hud?.ClearFailureDisplay();
             Debug.Log(LogTag + " reset referenceFloorY=cleared");
-        }
-
-        void RemoveLastMarker()
-        {
-            if (markerRoot == null || markerRoot.childCount == 0)
-            {
-                return;
-            }
-
-            Destroy(markerRoot.GetChild(markerRoot.childCount - 1).gameObject);
         }
 
         void TrySelectCorner(Vector2 screen)
@@ -408,9 +535,9 @@ namespace RoomTwin.AR
                 return;
             }
 
-            if (capture.IsComplete)
+            if (meshBuilt)
             {
-                Reject("Four corners are already selected. Reset before measuring again.");
+                Reject("The room is already built. Start a new scan to measure again.");
                 return;
             }
 
@@ -443,58 +570,51 @@ namespace RoomTwin.AR
                 return;
             }
 
-            DetectedWall selected = ToWall(selectedPlane);
-            var others = new List<DetectedWall>();
-            foreach (ARPlane plane in planeManager.trackables)
+            RememberSeen(selectedPlane.trackableId.ToString());
+            UpdateClusters(floorY, true);
+            WallCluster selectedCluster = wallClusters.FindByMember(selectedPlane.trackableId.ToString());
+            if (selectedCluster == null || !string.IsNullOrEmpty(selectedCluster.DiscardReason))
             {
-                if (plane.trackableId == selectedPlane.trackableId || plane.alignment != PlaneAlignment.Vertical)
+                Reject("The selected surface is not a stable wall candidate.");
+                return;
+            }
+
+            string planeId = selectedPlane.trackableId.ToString();
+            bool addedIntent = false;
+            if (!intendedPlaneIds.Contains(planeId))
+            {
+                if (intendedPlaneIds.Count >= 12)
                 {
-                    continue;
+                    intendedPlaneIds.RemoveAt(0);
                 }
 
-                others.Add(ToWall(plane));
+                intendedPlaneIds.Add(planeId);
+                addedIntent = true;
             }
 
-            if (!WallCornerSolver.TryEstimate(selected, others, floorY, out WallCornerEstimate estimate))
-            {
-                Reject(estimate.Rejection);
-                Debug.LogWarning(
-                    $"{LogTag} corner-estimate selected={selected.Id} touch={Format(hit.pose.position)} " +
-                    $"floorY={floorY.ToString("0.000", CultureInfo.InvariantCulture)} accepted=false reason=\"{estimate.Rejection}\"");
-                return;
-            }
-
-            Vector3 corner = estimate.Corner;
-            lastRejection = string.Empty;
-            if (!capture.TryAdd(corner, out string rejection))
-            {
-                Reject(rejection);
-                Debug.LogWarning($"{LogTag} rejected estimatedCorner={Format(corner)} reason=\"{rejection}\"");
-                return;
-            }
-
-            EnsureMarkerRoot();
-            CreateMarker(capture.Count, corner);
-            sessionLog?.Accept();
+            highlightedSelected = planeId;
+            highlightedOther = string.Empty;
             sessionLog?.Write(
-                "corner",
-                "\"index\":" + capture.Count.ToString(CultureInfo.InvariantCulture) +
-                ",\"corner\":" + JsonVector(corner) +
-                ",\"selected\":" + ScanSessionLog.Quote(estimate.SelectedWallId) +
-                ",\"other\":" + ScanSessionLog.Quote(estimate.OtherWallId));
-            highlightedSelected = estimate.SelectedWallId;
-            highlightedOther = estimate.OtherWallId;
-            pulseUntil = Time.time + 0.35f;
-            LogEstimate(capture.Count, hit.pose.position, estimate);
-            RefreshPresentation();
-
-            if (!capture.IsComplete)
+                "intent",
+                "\"plane\":" + ScanSessionLog.Quote(planeId) +
+                ",\"cluster\":" + ScanSessionLog.Quote(selectedCluster.Id) +
+                ",\"touch\":" + JsonVector(hit.pose.position) +
+                ",\"floorY\":" + floorY.ToString("0.000", CultureInfo.InvariantCulture));
+            Debug.Log(LogTag + " intent plane=" + planeId + " cluster=" + selectedCluster.Id + " touch=" + Format(hit.pose.position));
+            if (!TryUpdatePreview(floorY))
             {
-                status = $"Estimated corner {capture.Count}/4. Select the next wall.";
+                Reject(string.IsNullOrEmpty(lastRejection) ? "Not enough wall information to close a room." : lastRejection);
                 return;
             }
 
-            BuildRoom();
+            if (addedIntent)
+            {
+                sessionLog?.Accept();
+            }
+
+            lastRejection = string.Empty;
+            status = "방 윤곽 미리보기입니다. 맞으면 확정하세요. 추정 길이는 실측이 아닙니다.";
+            RefreshPresentation();
         }
 
         bool TryGetSelectedWall(out ARRaycastHit chosen, out ARPlane plane)
@@ -524,21 +644,18 @@ namespace RoomTwin.AR
             }
 
             CollectFloorSamples();
-            return WallCornerSolver.TryChooseFloorY(floorSamples, floorHeightToleranceMeters, out floorY, out error);
+            UpdateClusters(float.NaN, false);
+            return floorEstimator.TryChoose(
+                floorObservations,
+                arCamera != null ? arCamera.transform.position.y : float.NaN,
+                floorHeightToleranceMeters,
+                wallBottoms,
+                out floorY,
+                out error);
         }
 
         static DetectedWall ToWall(ARPlane plane)
         {
-            Vector2[] boundary = null;
-            if (plane.boundary.IsCreated && plane.boundary.Length >= 3)
-            {
-                boundary = new Vector2[plane.boundary.Length];
-                for (int i = 0; i < plane.boundary.Length; i++)
-                {
-                    boundary[i] = plane.boundary[i];
-                }
-            }
-
             return new DetectedWall
             {
                 Id = plane.trackableId.ToString(),
@@ -547,23 +664,8 @@ namespace RoomTwin.AR
                 Center = plane.center,
                 AxisU = plane.transform.right,
                 AxisV = plane.transform.forward,
-                HalfExtents = plane.extents,
-                Boundary = boundary
+                HalfExtents = plane.extents
             };
-        }
-
-        void LogEstimate(int index, Vector3 touch, WallCornerEstimate estimate)
-        {
-            Debug.Log(
-                $"{LogTag} corner={index}/4 estimated=true not-a-survey " +
-                $"selected={estimate.SelectedWallId} other={estimate.OtherWallId} " +
-                $"touch={Format(touch)} corner={Format(estimate.Corner)} " +
-                $"line={Format(estimate.IntersectionDirection)} " +
-                $"floorY={estimate.FloorY.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"residualM={estimate.PlaneResidualMeters.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"boundaryOverflowM={estimate.BoundaryOverflowMeters.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"normalCross={estimate.NormalCrossMagnitude.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"touchToCornerM={Vector3.Distance(touch, estimate.Corner).ToString("0.000", CultureInfo.InvariantCulture)}");
         }
 
         string DescribeHorizontalYs()
@@ -664,6 +766,11 @@ namespace RoomTwin.AR
 
             logBuilder.Append(" estimated-edges=not a survey measurement");
             Debug.Log(logBuilder.ToString());
+            sessionLog?.Write(
+                "geometry",
+                "\"built\":" + (polygonValid ? "true" : "false") +
+                ",\"reason\":" + ScanSessionLog.Quote(error) +
+                ",\"edges\":" + ScanSessionLog.Quote(logBuilder.ToString()));
 
             IReadOnlyList<Vector3> corners = capture.WorldCorners;
             for (int i = 0; i < corners.Count; i++)
@@ -720,14 +827,18 @@ namespace RoomTwin.AR
             roomAnchor.SetPositionAndRotation(anchorWorld, Quaternion.identity);
         }
 
-        void CreateMarker(int number, Vector3 world)
+        void CreateMarker(int number, Vector3 world, bool candidate)
         {
             GameObject marker = markerPrefab != null
                 ? Instantiate(markerPrefab, world, Quaternion.identity, markerRoot)
                 : CreateMarkerObject(world);
-            marker.name = $"Corner_{number}";
-            marker.transform.localScale = Vector3.one * MarkerSizeMeters * 1.6f;
-            pulseMarker = marker.transform;
+            marker.name = (candidate ? "Candidate_" : "Corner_") + number;
+            float scale = candidate ? MarkerSizeMeters * 0.7f : MarkerSizeMeters * 1.6f;
+            marker.transform.localScale = Vector3.one * scale;
+            if (!candidate)
+            {
+                pulseMarker = marker.transform;
+            }
 
             Renderer renderer = marker.GetComponent<Renderer>();
             if (renderer == null)
@@ -741,10 +852,18 @@ namespace RoomTwin.AR
             }
 
             var block = new MaterialPropertyBlock();
-            Color color = NumberColor(number);
+            Color color = candidate ? new Color(0.75f, 0.86f, 1f) : NumberColor(number);
             block.SetColor("_BaseColor", color);
             block.SetColor("_Color", color);
             renderer.SetPropertyBlock(block);
+            var labelObject = new GameObject("Number");
+            labelObject.transform.SetParent(marker.transform, false);
+            labelObject.transform.localPosition = new Vector3(0f, 1.4f, 0f);
+            var label = labelObject.AddComponent<TextMesh>();
+            label.text = number.ToString(CultureInfo.InvariantCulture);
+            label.characterSize = candidate ? 0.08f : 0.12f;
+            label.anchor = TextAnchor.MiddleCenter;
+            label.color = color;
         }
 
         GameObject CreateMarkerObject(Vector3 world)
@@ -925,18 +1044,21 @@ namespace RoomTwin.AR
 
         void RefreshPresentation()
         {
-            CollectFloorSamples();
-            bool floorChosen = WallCornerSolver.TryChooseFloorY(
-                floorSamples, floorHeightToleranceMeters, out float candidateFloorY, out _);
+            bool floorChosen = TryResolveFloorY(out float candidateFloorY, out _);
+            if (!meshBuilt && intendedPlaneIds.Count > 0 && floorChosen)
+            {
+                TryUpdatePreview(candidateFloorY);
+            }
+
             bool floorReady = capture.HasReferenceFloorY || floorChosen;
             var snapshot = new ScanSnapshot
             {
                 IsTracking = ARSession.state == ARSessionState.SessionTracking,
                 FloorLocked = floorReady,
-                FloorUncertain = !capture.HasReferenceFloorY && !floorChosen && floorSamples.Count > 0,
-                VerticalWallCount = CountVerticalWalls(),
-                HasIntersectablePair = HasSolverValidPair(),
-                CornerCount = capture.Count,
+                FloorUncertain = !capture.HasReferenceFloorY && !floorChosen && floorObservations.Count > 0,
+                VerticalWallCount = wallClusters.Clusters.Count,
+                HasIntersectablePair = floorChosen && HasClosedRoom(candidateFloorY),
+                CornerCount = meshBuilt ? capture.Count : previewReady ? 4 : 0,
                 RoomBuilt = meshBuilt
             };
             string failure = string.IsNullOrEmpty(lastRejection) ? null : ScanFeedback.ToKorean(lastRejection);
@@ -952,6 +1074,7 @@ namespace RoomTwin.AR
         void CollectFloorSamples()
         {
             floorSamples.Clear();
+            floorObservations.Clear();
             if (planeManager == null)
             {
                 return;
@@ -964,12 +1087,208 @@ namespace RoomTwin.AR
                     continue;
                 }
 
+                string id = plane.trackableId.ToString();
+                RememberSeen(id);
+                float area = Mathf.Max(0f, plane.size.x * plane.size.y);
+                float seconds = ObservedSeconds(id);
                 floorSamples.Add(new WallCornerSolver.FloorSample
                 {
                     Height = plane.center.y,
-                    AreaSquareMeters = Mathf.Max(0f, plane.size.x * plane.size.y)
+                    AreaSquareMeters = area
+                });
+                floorObservations.Add(new FloorObservation
+                {
+                    Id = id,
+                    Height = plane.center.y,
+                    AreaSquareMeters = area,
+                    ObservedSeconds = seconds
                 });
             }
+        }
+
+        void UpdateClusters(float floorY, bool hasFloor)
+        {
+            wallObservations.Clear();
+            if (planeManager != null)
+            {
+                foreach (ARPlane plane in planeManager.trackables)
+                {
+                    if (plane.alignment != PlaneAlignment.Vertical)
+                    {
+                        continue;
+                    }
+
+                    string id = plane.trackableId.ToString();
+                    RememberSeen(id);
+                    wallObservations.Add(ToObservation(plane));
+                }
+            }
+
+            wallClusters.Rebuild(wallObservations, ActiveSettings(), floorY, hasFloor);
+            wallBottoms.Clear();
+            for (int i = 0; i < wallClusters.Clusters.Count; i++)
+            {
+                WallCluster cluster = wallClusters.Clusters[i];
+                if (string.IsNullOrEmpty(cluster.DiscardReason))
+                {
+                    wallBottoms.Add(cluster.VerticalMin);
+                }
+            }
+        }
+
+        bool TryUpdatePreview(float floorY)
+        {
+            UpdateClusters(floorY, true);
+            CollectRequiredClusters();
+            if (!reconstructionSolver.TryBuild(
+                    wallClusters.Clusters,
+                    floorY,
+                    requiredClusterIds,
+                    ActiveSettings(),
+                    out RoomReconstruction result))
+            {
+                previewReady = false;
+                previewCorners = null;
+                previewWallIds = null;
+                lastRejection = result.Rejection;
+                pulseMarker = null;
+                ClearChildren(markerRoot);
+                return false;
+            }
+
+            previewReady = true;
+            previewWallIds = result.WallIds;
+            lastRejection = string.Empty;
+            if (!SamePreview(result.Corners))
+            {
+                previewCorners = result.Corners;
+                pulseMarker = null;
+                ClearChildren(markerRoot);
+                EnsureMarkerRoot();
+                for (int i = 0; i < previewCorners.Length; i++)
+                {
+                    CreateMarker(i + 1, previewCorners[i], true);
+                }
+
+                sessionLog?.Write("preview", PreviewJson(result));
+            }
+
+            return true;
+        }
+
+        bool HasClosedRoom(float floorY)
+        {
+            UpdateClusters(floorY, true);
+            return reconstructionSolver.TryBuild(
+                wallClusters.Clusters,
+                floorY,
+                null,
+                ActiveSettings(),
+                out _);
+        }
+
+        void CollectRequiredClusters()
+        {
+            requiredClusterIds.Clear();
+            for (int i = 0; i < intendedPlaneIds.Count; i++)
+            {
+                WallCluster cluster = wallClusters.FindByMember(intendedPlaneIds[i]);
+                if (cluster == null || requiredClusterIds.Contains(cluster.Id))
+                {
+                    continue;
+                }
+
+                requiredClusterIds.Add(cluster.Id);
+            }
+        }
+
+        WallClusterSettings ActiveSettings()
+        {
+            return WallClusterSettings.Resolve(clusterSettings);
+        }
+
+        void RememberSeen(string id)
+        {
+            if (!firstSeenAt.ContainsKey(id))
+            {
+                firstSeenAt.Add(id, Time.time);
+            }
+        }
+
+        float ObservedSeconds(string id)
+        {
+            return firstSeenAt.TryGetValue(id, out float seenAt) ? Mathf.Max(0f, Time.time - seenAt) : 0f;
+        }
+
+        WallObservation ToObservation(ARPlane plane)
+        {
+            string id = plane.trackableId.ToString();
+            WallTrackingQuality tracking = WallTrackingQuality.None;
+            if (plane.trackingState == TrackingState.Tracking)
+            {
+                tracking = WallTrackingQuality.Tracking;
+            }
+            else if (plane.trackingState == TrackingState.Limited)
+            {
+                tracking = WallTrackingQuality.Limited;
+            }
+
+            return new WallObservation
+            {
+                Wall = ToWall(plane),
+                AreaSquareMeters = Mathf.Max(0f, plane.size.x * plane.size.y),
+                ObservedSeconds = ObservedSeconds(id),
+                Subsumed = plane.subsumedBy != null,
+                Tracking = tracking
+            };
+        }
+
+        bool SamePreview(Vector3[] next)
+        {
+            if (previewCorners == null || next == null || previewCorners.Length != next.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < next.Length; i++)
+            {
+                if ((previewCorners[i] - next[i]).sqrMagnitude > 0.0004f)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        static string PreviewJson(RoomReconstruction result)
+        {
+            var builder = new StringBuilder(128);
+            builder.Append("\"confidence\":").Append(result.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
+            builder.Append(",\"corners\":[");
+            for (int i = 0; i < result.Corners.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(',');
+                }
+
+                builder.Append(JsonVector(result.Corners[i]));
+            }
+
+            builder.Append("],\"edges\":[");
+            for (int i = 0; i < result.EdgeLengths.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(',');
+                }
+
+                builder.Append(result.EdgeLengths[i].ToString("0.000", CultureInfo.InvariantCulture));
+            }
+
+            builder.Append(']');
+            return builder.ToString();
         }
 
         int CountVerticalWalls()
@@ -989,37 +1308,6 @@ namespace RoomTwin.AR
             }
 
             return count;
-        }
-
-        bool HasSolverValidPair()
-        {
-            if (planeManager == null || !TryResolveFloorY(out float floorY, out _))
-            {
-                return false;
-            }
-
-            verticalWalls.Clear();
-            foreach (ARPlane plane in planeManager.trackables)
-            {
-                if (plane.alignment == PlaneAlignment.Vertical)
-                {
-                    verticalWalls.Add(ToWall(plane));
-                }
-            }
-
-            for (int i = 0; i < verticalWalls.Count; i++)
-            {
-                for (int j = i + 1; j < verticalWalls.Count; j++)
-                {
-                    if (WallCornerSolver.TryPair(verticalWalls[i], verticalWalls[j], floorY, out WallCornerEstimate estimate)
-                        && estimate.Accepted)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
         }
 
         string BuildDebugText(float candidateFloorY, bool floorChosen)
@@ -1049,8 +1337,10 @@ namespace RoomTwin.AR
                 logBuilder.Append(floorSamples[i].AreaSquareMeters.ToString("0.00", CultureInfo.InvariantCulture));
             }
 
-            logBuilder.Append("\nVertical walls: ").Append(CountVerticalWalls());
-            logBuilder.Append("\nCorners: ").Append(capture.Count).Append("/4");
+            logBuilder.Append("\nWall clusters: ").Append(wallClusters.Clusters.Count.ToString(CultureInfo.InvariantCulture));
+            logBuilder.Append("\nDiscarded: ").Append(wallClusters.Discarded.Count.ToString(CultureInfo.InvariantCulture));
+            logBuilder.Append("\nPreview: ").Append(previewReady ? "yes" : "no");
+            logBuilder.Append("\nCorners: ").Append(capture.Count.ToString(CultureInfo.InvariantCulture)).Append("/4");
             logBuilder.Append("\nLast failure: ");
             logBuilder.Append(string.IsNullOrEmpty(lastRejection) ? "none" : lastRejection);
             logBuilder.Append("\nLog: ").Append(logStatus);
@@ -1072,44 +1362,65 @@ namespace RoomTwin.AR
                 return;
             }
 
-            if (!string.IsNullOrEmpty(highlightedSelected))
+            if (previewWallIds != null)
             {
-                visibleWallIds.Add(highlightedSelected);
+                for (int i = 0; i < previewWallIds.Length; i++)
+                {
+                    AddClusterMembers(previewWallIds[i]);
+                }
             }
 
-            if (!string.IsNullOrEmpty(highlightedOther))
+            for (int i = 0; i < intendedPlaneIds.Count; i++)
             {
-                visibleWallIds.Add(highlightedOther);
+                AddVisible(intendedPlaneIds[i]);
             }
 
-            string largestId = null;
-            float largestArea = 0f;
-            int shown = visibleWallIds.Count;
-            foreach (ARPlane plane in planeManager.trackables)
+            if (visibleWallIds.Count > 0)
             {
-                if (plane.alignment != PlaneAlignment.Vertical || shown >= 4)
+                return;
+            }
+
+            WallCluster largest = null;
+            for (int i = 0; i < wallClusters.Clusters.Count; i++)
+            {
+                WallCluster cluster = wallClusters.Clusters[i];
+                if (largest == null || cluster.AreaSquareMeters > largest.AreaSquareMeters)
+                {
+                    largest = cluster;
+                }
+            }
+
+            if (largest != null)
+            {
+                AddClusterMembers(largest.Id);
+            }
+        }
+
+        void AddClusterMembers(string clusterId)
+        {
+            for (int i = 0; i < wallClusters.Clusters.Count; i++)
+            {
+                WallCluster cluster = wallClusters.Clusters[i];
+                if (cluster.Id != clusterId)
                 {
                     continue;
                 }
 
-                float area = plane.size.x * plane.size.y;
-                string id = plane.trackableId.ToString();
-                if (visibleWallIds.Contains(id))
+                for (int m = 0; m < cluster.MemberIds.Count; m++)
                 {
-                    continue;
-                }
-
-                if (area > largestArea)
-                {
-                    largestArea = area;
-                    largestId = id;
+                    AddVisible(cluster.MemberIds[m]);
                 }
             }
+        }
 
-            if (largestId != null && shown < 4)
+        void AddVisible(string id)
+        {
+            if (string.IsNullOrEmpty(id) || visibleWallIds.Count >= 8 || visibleWallIds.Contains(id))
             {
-                visibleWallIds.Add(largestId);
+                return;
             }
+
+            visibleWallIds.Add(id);
         }
 
         static bool TryGetPressScreenPosition(out Vector2 screenPosition)

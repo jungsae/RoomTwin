@@ -15,7 +15,7 @@ RoomTwin/
 ## Runtime Modules (MVP)
 
 ```
-[AR Session] -> [Measurement Capture] -> [Room Builder]
+[AR Session] -> [Wall clusters] -> [Room reconstruction] -> [Room Builder]
                                               |
                                       [Manual Correction]
                                               |
@@ -27,7 +27,7 @@ RoomTwin/
 | Module | Responsibility |
 |--------|----------------|
 | AR Session | AR Foundation session, plane/raycast input in session space |
-| Measurement Capture | Convert uncertain AR hits/planes into candidate dimensions (meters) |
+| Measurement Capture | Convert uncertain AR hits/planes into candidate dimensions (meters). Vertical fragments are clustered before a closed quad is estimated. |
 | Room Builder | Build editable room geometry from room-local meters. `RoomGeometryData` does not store AR session poses. |
 | Manual Correction | User edits length / height / corners |
 | Room Store | Serialize / deserialize room + furniture; never stores live session poses as truth |

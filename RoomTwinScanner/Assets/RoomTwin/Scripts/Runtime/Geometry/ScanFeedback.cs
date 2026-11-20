@@ -1,3 +1,5 @@
+using System;
+
 namespace RoomTwin.Geometry
 {
     public enum ScanPhase
@@ -85,6 +87,11 @@ namespace RoomTwin.Geometry
                 return failure;
             }
 
+            if (phase == ScanPhase.ReadyToEstimate && cornerCount >= 4)
+            {
+                return "방 윤곽 미리보기입니다. 맞으면 확정하세요. 추정 길이는 실측이 아닙니다.";
+            }
+
             if (phase == ScanPhase.ReadyToEstimate && cornerCount > 0)
             {
                 return "모서리 " + ProgressLabel(cornerCount) + "을 추정했습니다. 다음 벽을 선택하세요.";
@@ -108,6 +115,26 @@ namespace RoomTwin.Geometry
             if (string.IsNullOrEmpty(reason))
             {
                 return string.Empty;
+            }
+
+            if (reason.IndexOf("not enough", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "벽 정보가 부족합니다. 다른 방향의 벽을 더 비춰 주세요.";
+            }
+
+            if (reason.Contains("ambiguous"))
+            {
+                return "벽 후보가 불확실합니다. 그 벽을 더 오래 비춰 주세요.";
+            }
+
+            if (reason.Contains("inconsistent"))
+            {
+                return "벽 후보가 서로 맞지 않습니다. 모서리 주변을 더 비춰 주세요.";
+            }
+
+            if (reason.Contains("not a stable"))
+            {
+                return "안정적인 벽 후보가 아닙니다. 벽을 더 비춰 주세요.";
             }
 
             if (reason.Contains("parallel"))

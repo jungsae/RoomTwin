@@ -61,6 +61,13 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Why**: The verified pose path and the Editor mesh builder stay separate. A mesh parented to the camera would slide when the phone moves.
 - **Note**: A corner is the intersection of two vertical wall planes and one floor height. The touch point on a wall is not projected down to the floor. Floor height is locked only when one horizontal surface is clearly larger than the others. A large table can still win over a small visible floor patch, and the lowest plane is not chosen automatically. Estimated edge lengths are not survey measurements. Wall outlines show detected plane boundaries, not architectural edges.
 
+## D-011 — Cluster wall fragments before closing a room
+
+- **Status**: Accepted for `feat/ar-room-reconstruction-v2`
+- **Decision**: A vertical `ARPlane` is a sample, not a wall. `WallClusterBuilder` merges samples whose normals agree within 12° after flipping opposite normals, whose plane offset is at most 0.18 m, and whose horizontal spans overlap or leave a gap of at most 1.2 m. `RoomReconstructionSolver` then searches observed clusters for one convex quad. A rectangle length check runs only when opposite walls are parallel and the directions are within 12° of orthogonal. Missing walls are not invented. Low-confidence or inconsistent candidates withhold the mesh. The user tap selects a cluster; `확정` is the only path into `RoomMeshGenerator`.
+- **Why**: Device logs showed four corners built from eight plane ids. Independent pair intersections can close a mathematically valid polygon that does not match the room.
+- **Assumptions, not measurements**: 12° and 0.18 m separate a closet face from the wall behind it. 1.2 m keeps a doorway gap on one wall. 0.45 confidence, 0.4 s observation, 0.45 m minimum edge, and 0.8 m² minimum area are starting gates. Change them on `WallClusterSettings` if a device log shows a real room rejected or a closet merged.
+
 ## D-009 — Do not renumber the roadmap to match the GeometrySandbox
 
 - **Status**: Proposed

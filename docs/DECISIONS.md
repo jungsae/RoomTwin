@@ -54,6 +54,13 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Why**: Cursor and Codex work in separate worktrees. Direct `main` updates skip review and can overwrite the other agent's branch.
 - **Note**: The procedure is `docs/DEVELOPMENT_WORKFLOW.md`.
 
+## D-010 — Field-test room uses the first corner and one floor height
+
+- **Status**: Accepted for the 2026-11-21 field test
+- **Decision**: `ARFieldTest` keeps the Phase 0 AR session. Four `HorizontalUp` raycast hits are stored in tap order. `RoomLocalFrame` sets the room anchor at the first corner's XZ and one floor Y, with identity world rotation, parented to the XR Origin rather than the camera. Wall height stays 2.4 m. Edge lengths are horizontal meters for a tape comparison, not a survey.
+- **Why**: The verified pose path and the Editor mesh builder stay separate. A mesh parented to the camera would slide when the phone moves.
+- **Note**: Raycast can fail outside a detected plane. That is a field-test limit, not an automatic wall-corner detector.
+
 ## D-009 — Do not renumber the roadmap to match the GeometrySandbox
 
 - **Status**: Proposed

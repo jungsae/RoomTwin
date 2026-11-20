@@ -229,7 +229,7 @@ namespace RoomTwin.AR
                 text.alignment = alignment;
                 text.fontStyle = style;
                 text.color = Color.white;
-                text.enableWordWrapping = true;
+                text.textWrappingMode = TextWrappingModes.Normal;
                 text.raycastTarget = false;
                 slot.Tmp = text;
             }

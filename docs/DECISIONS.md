@@ -59,7 +59,7 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Status**: Accepted for the 2026-11-21 field test
 - **Decision**: `ARFieldTest` keeps the Phase 0 AR session. Four `HorizontalUp` raycast hits are stored in tap order. `RoomLocalFrame` sets the room anchor at the first corner's XZ and one floor Y, with identity world rotation, parented to the XR Origin rather than the camera. Wall height stays 2.4 m. Edge lengths are horizontal meters for a tape comparison, not a survey.
 - **Why**: The verified pose path and the Editor mesh builder stay separate. A mesh parented to the camera would slide when the phone moves.
-- **Note**: A corner is the intersection of two vertical wall planes and one floor height. The touch point on a wall is not projected down to the floor. If the horizontal planes disagree by more than 0.12 m, the floor height stays unlocked. Estimated edge lengths are not survey measurements.
+- **Note**: A corner is the intersection of two vertical wall planes and one floor height. The touch point on a wall is not projected down to the floor. Floor height is locked only when one horizontal surface is clearly larger than the others. A large table can still win over a small visible floor patch, and the lowest plane is not chosen automatically. Estimated edge lengths are not survey measurements. Wall outlines show detected plane boundaries, not architectural edges.
 
 ## D-009 — Do not renumber the roadmap to match the GeometrySandbox
 

@@ -52,6 +52,15 @@ namespace RoomTwin.AR
 
         readonly FloorCornerCapture capture = new FloorCornerCapture();
         readonly StringBuilder logBuilder = new StringBuilder(512);
+        readonly List<WallCornerSolver.FloorSample> floorSamples = new List<WallCornerSolver.FloorSample>(8);
+        readonly List<Vector3> verticalNormals = new List<Vector3>(8);
+        ArScanHud hud;
+        ArScanWallOutlines outlines;
+        string highlightedSelected = string.Empty;
+        string highlightedOther = string.Empty;
+        float pulseUntil;
+        float presentationTimer;
+        Transform pulseMarker;
         Transform sessionRoot;
         Transform markerRoot;
         Transform roomAnchor;
@@ -93,6 +102,20 @@ namespace RoomTwin.AR
 
             sessionRoot = raycastManager != null ? raycastManager.transform : transform;
             capture.HeightToleranceMeters = floorHeightToleranceMeters;
+            hud = GetComponent<ArScanHud>();
+            if (hud == null)
+            {
+                hud = gameObject.AddComponent<ArScanHud>();
+            }
+
+            outlines = GetComponent<ArScanWallOutlines>();
+            if (outlines == null)
+            {
+                outlines = gameObject.AddComponent<ArScanWallOutlines>();
+            }
+
+            hud.BindReset(ResetCapture);
+            RefreshPresentation();
         }
 
         void OnEnable()
@@ -111,12 +134,30 @@ namespace RoomTwin.AR
 
         void Update()
         {
+            if (pulseMarker != null)
+            {
+                float t = Mathf.Clamp01((pulseUntil - Time.time) / 0.35f);
+                pulseMarker.localScale = Vector3.one * Mathf.Lerp(MarkerSizeMeters, MarkerSizeMeters * 1.6f, t);
+                if (t <= 0f)
+                {
+                    pulseMarker.localScale = Vector3.one * MarkerSizeMeters;
+                    pulseMarker = null;
+                }
+            }
+
+            presentationTimer -= Time.deltaTime;
+            if (presentationTimer <= 0f)
+            {
+                presentationTimer = 0.25f;
+                RefreshPresentation();
+            }
+
             if (!TryGetPressScreenPosition(out Vector2 screen))
             {
                 return;
             }
 
-            if (IsScreenPointOverReset(screen))
+            if (hud != null && hud.ContainsScreenPoint(screen))
             {
                 return;
             }
@@ -153,6 +194,11 @@ namespace RoomTwin.AR
             DestroyChild(roomAnchor);
             markerRoot = null;
             roomAnchor = null;
+            pulseMarker = null;
+            highlightedSelected = string.Empty;
+            highlightedOther = string.Empty;
+            hud?.ClearFailureDisplay();
+            RefreshPresentation();
             Debug.Log($"{LogTag} reset referenceFloorY=cleared");
         }
 
@@ -221,6 +267,7 @@ namespace RoomTwin.AR
             }
 
             Vector3 corner = estimate.Corner;
+            lastRejection = string.Empty;
             if (!capture.TryAdd(corner, out string rejection))
             {
                 Reject(rejection);
@@ -230,7 +277,11 @@ namespace RoomTwin.AR
 
             EnsureMarkerRoot();
             CreateMarker(capture.Count, corner);
+            highlightedSelected = estimate.SelectedWallId;
+            highlightedOther = estimate.OtherWallId;
+            pulseUntil = Time.time + 0.35f;
             LogEstimate(capture.Count, hit.pose.position, estimate);
+            RefreshPresentation();
 
             if (!capture.IsComplete)
             {
@@ -267,19 +318,8 @@ namespace RoomTwin.AR
                 return true;
             }
 
-            var heights = new List<float>();
-            if (planeManager != null)
-            {
-                foreach (ARPlane plane in planeManager.trackables)
-                {
-                    if (plane.alignment == PlaneAlignment.HorizontalUp)
-                    {
-                        heights.Add(plane.center.y);
-                    }
-                }
-            }
-
-            return WallCornerSolver.TryChooseFloorY(heights, floorHeightToleranceMeters, out floorY, out error);
+            CollectFloorSamples();
+            return WallCornerSolver.TryChooseFloorY(floorSamples, floorHeightToleranceMeters, out floorY, out error);
         }
 
         static DetectedWall ToWall(ARPlane plane)
@@ -472,7 +512,8 @@ namespace RoomTwin.AR
                 ? Instantiate(markerPrefab, world, Quaternion.identity, markerRoot)
                 : CreateMarkerObject(world);
             marker.name = $"Corner_{number}";
-            marker.transform.localScale = Vector3.one * MarkerSizeMeters;
+            marker.transform.localScale = Vector3.one * MarkerSizeMeters * 1.6f;
+            pulseMarker = marker.transform;
 
             Renderer renderer = marker.GetComponent<Renderer>();
             if (renderer == null)
@@ -633,46 +674,105 @@ namespace RoomTwin.AR
             }
         }
 
-        bool IsScreenPointOverReset(Vector2 screenPosition)
+        void RefreshPresentation()
         {
-            float scale = GuiScale();
-            var guiPoint = new Vector2(screenPosition.x, Screen.height - screenPosition.y) / scale;
-            return ResetButtonRect().Contains(guiPoint);
-        }
-
-        static float GuiScale()
-        {
-            float dpiScale = Screen.dpi > 0f ? Screen.dpi / 160f : 1f;
-            return Mathf.Clamp(dpiScale, 1f, 3f);
-        }
-
-        static Rect ResetButtonRect()
-        {
-            return new Rect(16f, 220f, 280f, 52f);
-        }
-
-        void OnGUI()
-        {
-            float scale = GuiScale();
-            Matrix4x4 previous = GUI.matrix;
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-
-            GUI.Box(new Rect(8f, 8f, 640f, 300f), GUIContent.none);
-            string tracking = arSession != null ? ARSession.state.ToString() : "No ARSession";
-            string reference = capture.HasReferenceFloorY
-                ? capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture) + " m"
-                : "not set";
-            GUI.Label(new Rect(20f, 16f, 600f, 24f), "Tracking: " + tracking);
-            GUI.Label(new Rect(20f, 40f, 600f, 24f), "HorizontalUp planes: " + CountHorizontalFloors());
-            GUI.Label(new Rect(20f, 64f, 600f, 24f), $"Corners: {capture.Count}/4  floor Y: {reference}");
-            GUI.Label(new Rect(20f, 88f, 600f, 48f), "Select a wall. The corner is the wall intersection, not the touch point.");
-            GUI.Label(new Rect(20f, 136f, 600f, 72f), "Room: " + (meshBuilt ? "built" : status));
-            if (GUI.Button(ResetButtonRect(), "Reset"))
+            if (hud == null)
             {
-                ResetCapture();
+                return;
             }
 
-            GUI.matrix = previous;
+            bool floorReady = capture.HasReferenceFloorY || FloorCanBeChosen();
+            var snapshot = new ScanSnapshot
+            {
+                IsTracking = ARSession.state == ARSessionState.SessionTracking,
+                FloorLocked = floorReady,
+                FloorUncertain = !capture.HasReferenceFloorY && !floorReady && floorSamples.Count > 0,
+                VerticalWallCount = CountVerticalWalls(),
+                HasIntersectablePair = HasIntersectableWallPair(),
+                CornerCount = capture.Count,
+                RoomBuilt = meshBuilt
+            };
+            string failure = string.IsNullOrEmpty(lastRejection) ? null : ScanFeedback.ToKorean(lastRejection);
+            hud.Apply(snapshot, failure, null);
+            outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil);
+        }
+
+        bool FloorCanBeChosen()
+        {
+            CollectFloorSamples();
+            return WallCornerSolver.TryChooseFloorY(floorSamples, floorHeightToleranceMeters, out _, out _);
+        }
+
+        void CollectFloorSamples()
+        {
+            floorSamples.Clear();
+            if (planeManager == null)
+            {
+                return;
+            }
+
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment != PlaneAlignment.HorizontalUp)
+                {
+                    continue;
+                }
+
+                floorSamples.Add(new WallCornerSolver.FloorSample
+                {
+                    Height = plane.center.y,
+                    AreaSquareMeters = Mathf.Max(0f, plane.size.x * plane.size.y)
+                });
+            }
+        }
+
+        int CountVerticalWalls()
+        {
+            if (planeManager == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment == PlaneAlignment.Vertical)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        bool HasIntersectableWallPair()
+        {
+            verticalNormals.Clear();
+            if (planeManager == null)
+            {
+                return false;
+            }
+
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment == PlaneAlignment.Vertical)
+                {
+                    verticalNormals.Add(plane.normal);
+                }
+            }
+
+            for (int i = 0; i < verticalNormals.Count; i++)
+            {
+                for (int j = i + 1; j < verticalNormals.Count; j++)
+                {
+                    if (Vector3.Cross(verticalNormals[i], verticalNormals[j]).magnitude >= WallCornerSolver.MinNormalCrossMagnitude)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         static bool TryGetPressScreenPosition(out Vector2 screenPosition)

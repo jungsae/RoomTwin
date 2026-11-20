@@ -87,6 +87,105 @@ namespace RoomTwin.Geometry
             return true;
         }
 
+        public const float MinimumFloorAreaSquareMeters = 0.5f;
+        public const float DominantFloorAreaRatio = 2f;
+
+        public struct FloorSample
+        {
+            public float Height;
+            public float AreaSquareMeters;
+        }
+
+        public static bool TryChooseFloorY(
+            IReadOnlyList<FloorSample> samples,
+            float toleranceMeters,
+            out float floorY,
+            out string error)
+        {
+            floorY = 0f;
+            error = null;
+            if (samples == null || samples.Count == 0)
+            {
+                error = "Scan the floor. No HorizontalUp plane is available, so the floor height is not locked.";
+                return false;
+            }
+
+            var usable = new List<FloorSample>();
+            for (int i = 0; i < samples.Count; i++)
+            {
+                FloorSample sample = samples[i];
+                if (!float.IsFinite(sample.Height) || !float.IsFinite(sample.AreaSquareMeters) || sample.AreaSquareMeters <= 0f)
+                {
+                    continue;
+                }
+
+                usable.Add(sample);
+            }
+
+            if (usable.Count == 0)
+            {
+                error = "Scan the floor. The horizontal surfaces found are not large enough to lock a floor height.";
+                return false;
+            }
+
+            usable.Sort((a, b) => a.Height.CompareTo(b.Height));
+            var areas = new List<float>();
+            var heights = new List<float>();
+            float clusterArea = 0f;
+            float clusterWeighted = 0f;
+            float clusterMean = usable[0].Height;
+            for (int i = 0; i < usable.Count; i++)
+            {
+                FloorSample sample = usable[i];
+                if (clusterArea > 0f && Mathf.Abs(sample.Height - clusterMean) > toleranceMeters)
+                {
+                    areas.Add(clusterArea);
+                    heights.Add(clusterWeighted / clusterArea);
+                    clusterArea = 0f;
+                    clusterWeighted = 0f;
+                }
+
+                clusterArea += sample.AreaSquareMeters;
+                clusterWeighted += sample.Height * sample.AreaSquareMeters;
+                clusterMean = clusterWeighted / clusterArea;
+            }
+
+            areas.Add(clusterArea);
+            heights.Add(clusterWeighted / clusterArea);
+
+            int best = 0;
+            int second = -1;
+            for (int i = 1; i < areas.Count; i++)
+            {
+                if (areas[i] > areas[best])
+                {
+                    second = best;
+                    best = i;
+                }
+                else if (second < 0 || areas[i] > areas[second])
+                {
+                    second = i;
+                }
+            }
+
+            if (areas[best] < MinimumFloorAreaSquareMeters)
+            {
+                error = "Scan more of the room floor. The horizontal surfaces are still too small to lock a floor height.";
+                return false;
+            }
+
+            if (second >= 0 && areas[best] < areas[second] * DominantFloorAreaRatio)
+            {
+                error =
+                    "Floor height is uncertain. More than one large horizontal surface is visible. " +
+                    "Scan the room floor until one surface is clearly larger.";
+                return false;
+            }
+
+            floorY = heights[best];
+            return true;
+        }
+
         public static bool TryEstimate(
             DetectedWall selected,
             IReadOnlyList<DetectedWall> otherWalls,

@@ -33,7 +33,13 @@ android {
 }
 
 dependencies {
-    implementation("com.google.code.gson:gson:2.14.0")
+    if (providers.gradleProperty("usePublishedBridge").orNull == "true") {
+        implementation("com.roomtwin:native-ai:0.1.0")
+    } else {
+        implementation(project(":bridge"))
+    }
+    implementation("androidx.core:core:1.17.0")
     testImplementation("junit:junit:4.13.2")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
+    "fieldImplementation"("com.google.code.gson:gson:2.14.0")
+    "fieldImplementation"("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
 }

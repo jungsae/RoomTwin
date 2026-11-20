@@ -27,16 +27,19 @@ namespace RoomTwin.Geometry.Tests
         public void Start_WritesANewSessionFile()
         {
             ScanSessionLog log = ScanSessionLog.Start(directory, "0.1.0", "c9a5169", "test-device");
-            log.Accept();
+            log.AcceptWallIntent();
+            log.AcceptOutline();
             log.Reject();
             log.Write("corner", "\"index\":1");
-            log.DisposeWriter();
+            log.StopRecording();
 
             Assert.IsTrue(File.Exists(log.FilePath));
             string body = File.ReadAllText(log.FilePath);
             StringAssert.Contains("session-start", body);
             StringAssert.Contains("\"type\":\"corner\"", body);
-            Assert.AreEqual(1, log.AcceptedCount);
+            StringAssert.Contains("wallIntent", body);
+            Assert.AreEqual(1, log.WallIntentCount);
+            Assert.AreEqual(1, log.OutlineCount);
             Assert.AreEqual(1, log.RejectedCount);
         }
 
@@ -56,7 +59,7 @@ namespace RoomTwin.Geometry.Tests
         public void DeleteAll_RemovesSessionFiles()
         {
             ScanSessionLog first = ScanSessionLog.Start(directory, "0.1.0", "abc", "phone");
-            first.DisposeWriter();
+            first.StopRecording();
             ScanSessionLog.DeleteAll(directory);
 
             Assert.AreEqual(0, Directory.GetFiles(directory, "scan_*.jsonl").Length);
@@ -74,6 +77,32 @@ namespace RoomTwin.Geometry.Tests
             Assert.IsTrue(capture.HasReferenceFloorY);
             capture.Reset();
             Assert.IsFalse(capture.HasReferenceFloorY);
+        }
+
+        [Test]
+        public void ByteLimit_StopsFurtherWrites()
+        {
+            ScanSessionLog log = ScanSessionLog.Start(directory, "0.1.0", "abc", "phone");
+            log.SetByteLimit(64);
+            log.Write("overflow", "\"x\":1");
+            log.Write("after", "\"x\":2");
+
+            string body = File.ReadAllText(log.FilePath);
+            Assert.IsFalse(log.IsRecording);
+            Assert.IsFalse(body.Contains("overflow"));
+            Assert.IsFalse(body.Contains("after"));
+            log.StopRecording();
+        }
+
+        [Test]
+        public void DeleteAndFailedWrite_DoNotThrow()
+        {
+            ScanSessionLog log = ScanSessionLog.Start(directory, "0.1.0", "abc", "phone");
+            Assert.DoesNotThrow(() => ScanSessionLog.DeleteAll(directory));
+            log.StopRecording();
+            Assert.DoesNotThrow(() => log.Write("after-failure", "\"x\":1"));
+            Assert.IsFalse(log.IsRecording);
+            Assert.IsNull(ScanSessionLog.ExportLatest(Path.Combine(directory, "missing-file")));
         }
     }
 }

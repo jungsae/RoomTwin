@@ -12,14 +12,23 @@ namespace RoomTwin.Geometry
     public sealed class ScanSessionLog
     {
         public const int MaxFiles = 12;
+        public const long MaxFileBytes = 2L * 1024L * 1024L;
 
         readonly StreamWriter writer;
         bool recording;
+        long byteLimit = MaxFileBytes;
 
         public string SessionId { get; }
         public string FilePath { get; }
         public bool IsRecording => recording;
-        public int AcceptedCount { get; private set; }
+
+        /// <summary>A tapped plane was accepted as a wall selection.</summary>
+        public int WallIntentCount { get; private set; }
+
+        /// <summary>A closed room outline was estimated and shown.</summary>
+        public int OutlineCount { get; private set; }
+
+        /// <summary>An input was rejected. This is not an outline failure by itself.</summary>
         public int RejectedCount { get; private set; }
 
         ScanSessionLog(string sessionId, string filePath, StreamWriter writer)
@@ -46,7 +55,8 @@ namespace RoomTwin.Geometry
                     "\"version\":" + Quote(version) +
                     ",\"git\":" + Quote(gitSha) +
                     ",\"device\":" + Quote(deviceModel) +
-                    ",\"startedUtc\":" + Quote(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)));
+                    ",\"startedUtc\":" + Quote(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)) +
+                    ",\"metrics\":\"wallIntent=wall selection,outline=closed preview,rejected=input rejected\"");
                 return log;
             }
             catch (Exception)
@@ -55,9 +65,14 @@ namespace RoomTwin.Geometry
             }
         }
 
-        public void Accept()
+        public void AcceptWallIntent()
         {
-            AcceptedCount++;
+            WallIntentCount++;
+        }
+
+        public void AcceptOutline()
+        {
+            OutlineCount++;
         }
 
         public void Reject()
@@ -65,15 +80,26 @@ namespace RoomTwin.Geometry
             RejectedCount++;
         }
 
+        public void SetByteLimit(long bytes)
+        {
+            byteLimit = bytes > 0L ? bytes : MaxFileBytes;
+        }
+
         public void Write(string type, string fields)
         {
-            if (writer == null)
+            if (!recording || writer == null)
             {
                 return;
             }
 
             try
             {
+                if (writer.BaseStream != null && writer.BaseStream.Length >= byteLimit)
+                {
+                    StopRecording();
+                    return;
+                }
+
                 writer.Write("{\"type\":");
                 writer.Write(Quote(type));
                 writer.Write(",\"session\":");
@@ -90,8 +116,31 @@ namespace RoomTwin.Geometry
             }
             catch (Exception)
             {
-                recording = false;
+                StopRecording();
             }
+        }
+
+        public void Flush()
+        {
+            if (!recording || writer == null)
+            {
+                return;
+            }
+
+            try
+            {
+                writer.Flush();
+            }
+            catch (Exception)
+            {
+                StopRecording();
+            }
+        }
+
+        public void StopRecording()
+        {
+            recording = false;
+            DisposeWriter();
         }
 
         public void DisposeWriter()
@@ -147,42 +196,71 @@ namespace RoomTwin.Geometry
             int extra = files.Length - Math.Max(0, maxFiles);
             for (int i = 0; i < extra; i++)
             {
-                File.Delete(files[i]);
+                TryDelete(files[i]);
             }
         }
 
         public static void DeleteAll(string directory)
         {
-            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            try
             {
-                return;
-            }
+                if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+                {
+                    return;
+                }
 
-            string[] files = Directory.GetFiles(directory, "scan_*.jsonl");
-            for (int i = 0; i < files.Length; i++)
+                string[] files = Directory.GetFiles(directory, "scan_*.jsonl");
+                for (int i = 0; i < files.Length; i++)
+                {
+                    TryDelete(files[i]);
+                }
+
+                TryDelete(Path.Combine(directory, "latest-scan.jsonl"));
+            }
+            catch (Exception)
             {
-                File.Delete(files[i]);
             }
         }
 
         public static string ExportLatest(string directory)
         {
-            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            try
+            {
+                if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+                {
+                    return null;
+                }
+
+                string[] files = Directory.GetFiles(directory, "scan_*.jsonl");
+                if (files.Length == 0)
+                {
+                    return null;
+                }
+
+                Array.Sort(files, StringComparer.Ordinal);
+                string latest = files[files.Length - 1];
+                string destination = Path.Combine(directory, "latest-scan.jsonl");
+                File.Copy(latest, destination, true);
+                return destination;
+            }
+            catch (Exception)
             {
                 return null;
             }
+        }
 
-            string[] files = Directory.GetFiles(directory, "scan_*.jsonl");
-            if (files.Length == 0)
+        static void TryDelete(string path)
+        {
+            try
             {
-                return null;
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    File.Delete(path);
+                }
             }
-
-            Array.Sort(files, StringComparer.Ordinal);
-            string latest = files[files.Length - 1];
-            string destination = Path.Combine(directory, "latest-scan.jsonl");
-            File.Copy(latest, destination, true);
-            return destination;
+            catch (Exception)
+            {
+            }
         }
     }
 }

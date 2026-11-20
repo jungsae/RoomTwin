@@ -50,6 +50,16 @@ namespace RoomTwin.AR
         public string Progress => progress != null ? progress.text : string.Empty;
         public bool IsDeveloperPanelActive => debugPanel != null && debugPanel.gameObject.activeSelf;
         public Button ResetButtonComponent => resetButton != null ? resetButton.GetComponent<Button>() : null;
+        public Button UndoButtonComponent => undoButton != null ? undoButton.GetComponent<Button>() : null;
+        public Button ConfirmButtonComponent => confirmButton != null ? confirmButton.GetComponent<Button>() : null;
+
+        public void SetConfirmInteractable(bool interactable)
+        {
+            if (ConfirmButtonComponent != null)
+            {
+                ConfirmButtonComponent.interactable = interactable;
+            }
+        }
 
         public bool TryInitialize(out string error)
         {
@@ -257,10 +267,13 @@ namespace RoomTwin.AR
 
             topBar = CreateBar(safeRoot, "Top", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), BarHeight);
             headline = CreateLabel(topBar, font, 36, TextAnchor.MiddleCenter);
+            headline.text = ScanFeedback.Headline(ScanPhase.Tracking);
 
             bottomBar = CreateBar(safeRoot, "Bottom", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), 220f);
             guidance = CreateLabel(bottomBar, font, 32, TextAnchor.MiddleCenter);
+            guidance.text = ScanFeedback.Guidance(ScanPhase.Tracking, 0, null);
             progress = CreateLabel(bottomBar, font, 28, TextAnchor.MiddleCenter);
+            progress.text = "0/4";
             SetStretch(guidance.rectTransform, 0.04f, 0.42f, 0.72f, 0.92f);
             SetStretch(progress.rectTransform, 0.04f, 0.08f, 0.72f, 0.4f);
 
@@ -269,6 +282,7 @@ namespace RoomTwin.AR
             undoButton.anchoredPosition = new Vector2(-24f - ButtonSize - 16f, 24f);
             confirmButton = CreateButton(safeRoot, font, "확정", 28);
             confirmButton.anchoredPosition = new Vector2(-24f, 24f + ButtonSize + 12f);
+            SetConfirmInteractable(false);
             developerButton = CreateButton(safeRoot, font, "개발", 26);
             developerButton.anchorMin = new Vector2(0f, 0f);
             developerButton.anchorMax = new Vector2(0f, 0f);

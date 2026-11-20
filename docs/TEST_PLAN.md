@@ -64,7 +64,7 @@ Not a survey. A tap selects a wall cluster. The corner is the intersection of ob
 4. Read `[RoomTwin][FieldTest] edges-horizontal-m` and the JSONL `geometry` line. Compare with a tape only after one is measured. Do not treat the estimate as the room size.
 5. Pull logs with the `adb pull` command above. The developer panel can copy the latest file to `latest-scan.jsonl` or delete saved logs. At most 12 session files are kept.
 
-Edit Mode coverage lives in `RoomReconstructionTests` and `ScanSessionLogTests`. Those tests were added with this change and were not executed in the agent session. Do not mark them passed until Test Runner runs them.
+Edit Mode coverage lives in `RoomReconstructionTests`, `ScanSessionLogTests`, and `ScanSessionSafetyTests`. Play Mode coverage lives in `ArScanHudPlayModeTests`. These tests were not executed in the agent session that added the pre-APK safety pass. Do not mark them passed until Test Runner runs them.
 
 Editor checks for the coordinate mapping are in `FieldTestFrameTests`. They do not replace the device pass.
 

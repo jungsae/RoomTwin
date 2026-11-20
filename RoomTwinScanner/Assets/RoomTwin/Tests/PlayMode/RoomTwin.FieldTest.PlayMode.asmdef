@@ -3,7 +3,8 @@
     "rootNamespace": "RoomTwin.AR.PlayModeTests",
     "references": [
         "RoomTwin.FieldTest",
-        "RoomTwin.Geometry"
+        "RoomTwin.Geometry",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

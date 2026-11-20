@@ -61,6 +61,12 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Why**: The verified pose path and the Editor mesh builder stay separate. A mesh parented to the camera would slide when the phone moves.
 - **Note**: A corner is the intersection of two vertical wall planes and one floor height. The touch point on a wall is not projected down to the floor. Floor height is locked only when one horizontal surface is clearly larger than the others. A large table can still win over a small visible floor patch, and the lowest plane is not chosen automatically. Estimated edge lengths are not survey measurements. Wall outlines show detected plane boundaries, not architectural edges.
 
+## D-012 — Preview, rescan, and scan-log safety
+
+- **Status**: Accepted for the pre-APK pass on `feat/ar-room-reconstruction-v2`
+- **Decision**: A preview is cleared when tracking, the floor estimate, the selected wall, or the outline check fails. `확정` solves again and, if any corner moved by more than 0.25 m, shows the new preview instead of building. `ARSession.Reset` records the current plane ids and ignores them afterward. The rescan latch ends when those ids are gone and tracking is ready, or after 12 s, so a missed state event cannot block the session; retired ids stay blocked. A subsumed selection moves to the parent plane. A lost selection clears the preview and does not confirm a different room until the next tap. The JSONL writer stops after an I/O failure or 2 MB. `wallIntent`, `outline`, and `rejected` are separate counts. `RoomTwin/ArPlaneTransparent` is in Always Included Shaders and `Resources/ScanPlaneTransparent.mat`. A missing shader hides the mesh.
+- **Why**: The previous pass could confirm a stale outline, cluster planes that survived reset, and fall back to an opaque shader.
+
 ## D-011 — Cluster wall fragments before closing a room
 
 - **Status**: Accepted for `feat/ar-room-reconstruction-v2`

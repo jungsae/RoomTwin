@@ -117,6 +117,31 @@ namespace RoomTwin.Geometry
                 return string.Empty;
             }
 
+            if (reason.IndexOf("not ready", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "추적이 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.";
+            }
+
+            if (reason.Contains("no longer tracked"))
+            {
+                return "선택한 벽을 더 이상 추적하지 못합니다. 그 벽을 다시 선택해 주세요.";
+            }
+
+            if (reason.Contains("outline changed"))
+            {
+                return "윤곽이 바뀌었습니다. 새 미리보기를 확인한 뒤 다시 확정하세요.";
+            }
+
+            if (reason.Contains("already built"))
+            {
+                return "이미 방을 만들었습니다. 새 스캔 후에 다시 측정하세요.";
+            }
+
+            if (reason.Contains("previous scan"))
+            {
+                return "이전 스캔의 평면입니다. 새 평면이 보일 때까지 기다려 주세요.";
+            }
+
             if (reason.IndexOf("not enough", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "벽 정보가 부족합니다. 다른 방향의 벽을 더 비춰 주세요.";

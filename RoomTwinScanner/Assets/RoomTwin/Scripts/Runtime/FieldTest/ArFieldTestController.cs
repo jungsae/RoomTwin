@@ -61,6 +61,13 @@ namespace RoomTwin.AR
         readonly List<string> intendedPlaneIds = new List<string>(8);
         readonly List<string> requiredClusterIds = new List<string>(4);
         readonly Dictionary<string, float> firstSeenAt = new Dictionary<string, float>(32);
+        readonly Dictionary<string, string> subsumedParent = new Dictionary<string, string>();
+        readonly List<string> observedPlaneIds = new List<string>(32);
+        readonly List<string> clusterMemberIds = new List<string>(16);
+        readonly List<Mesh> ownedMeshes = new List<Mesh>(8);
+        readonly List<Material> ownedMaterials = new List<Material>(8);
+        readonly List<Material> markerMaterials = new List<Material>(4);
+        readonly RescanGate rescanGate = new RescanGate();
         readonly WallClusterBuilder wallClusters = new WallClusterBuilder();
         readonly FloorHeightEstimator floorEstimator = new FloorHeightEstimator();
         readonly RoomReconstructionSolver reconstructionSolver = new RoomReconstructionSolver();
@@ -77,6 +84,10 @@ namespace RoomTwin.AR
         Vector3[] previewCorners;
         string[] previewWallIds;
         bool previewReady;
+        bool suppressOutline;
+        public bool HasValidPreview => previewReady && previewCorners != null && previewCorners.Length == 4 && !waitingForRescan && !meshBuilt;
+        public bool LogIsRecording => sessionLog != null && sessionLog.IsRecording;
+        public bool IsRescanWaiting => waitingForRescan;
         float pulseUntil;
         float presentationTimer;
         Transform pulseMarker;
@@ -193,37 +204,90 @@ namespace RoomTwin.AR
         {
             ARSession.stateChanged -= OnSessionStateChanged;
             EnhancedTouchSupport.Disable();
-            sessionLog?.Write("session-end", "\"accepted\":" + (sessionLog?.AcceptedCount ?? 0).ToString(CultureInfo.InvariantCulture));
-            sessionLog?.DisposeWriter();
+            sessionLog?.Write(
+                "session-end",
+                "\"wallIntent\":" + (sessionLog != null ? sessionLog.WallIntentCount : 0).ToString(CultureInfo.InvariantCulture) +
+                ",\"outline\":" + (sessionLog != null ? sessionLog.OutlineCount : 0).ToString(CultureInfo.InvariantCulture) +
+                ",\"rejected\":" + (sessionLog != null ? sessionLog.RejectedCount : 0).ToString(CultureInfo.InvariantCulture));
+            sessionLog?.StopRecording();
             sessionLog = null;
         }
 
         void ExportLog()
         {
-            string directory = Path.Combine(Application.persistentDataPath, "Logs");
-            string exported = ScanSessionLog.ExportLatest(directory);
-            status = exported == null ? "저장된 로그가 없습니다." : exported;
-            Debug.Log(LogTag + " log-export=" + (exported ?? "none"));
+            try
+            {
+                sessionLog?.Flush();
+                string directory = Path.Combine(Application.persistentDataPath, "Logs");
+                string exported = ScanSessionLog.ExportLatest(directory);
+                status = exported == null ? "저장된 로그가 없습니다." : exported;
+                Debug.Log(LogTag + " log-export=" + (exported ?? "none"));
+            }
+            catch (Exception ex)
+            {
+                sessionLog?.StopRecording();
+                logStatus = "export-failed";
+                status = "로그를 복사하지 못했습니다. 스캔은 계속됩니다.";
+                Debug.LogWarning(LogTag + " log-export=failure " + ex.GetType().Name);
+            }
         }
 
         void DeleteLogs()
         {
-            string directory = Path.Combine(Application.persistentDataPath, "Logs");
-            ScanSessionLog.DeleteAll(directory);
-            logStatus = "deleted";
-            status = "저장된 스캔 로그를 삭제했습니다.";
-            Debug.Log(LogTag + " log-delete path=" + directory);
+            try
+            {
+                sessionLog?.StopRecording();
+                string directory = Path.Combine(Application.persistentDataPath, "Logs");
+                ScanSessionLog.DeleteAll(directory);
+                logStatus = "deleted";
+                status = "저장된 스캔 로그를 삭제했습니다. 새 스캔 전까지 기록하지 않습니다.";
+                Debug.Log(LogTag + " log-delete path=" + directory);
+            }
+            catch (Exception ex)
+            {
+                sessionLog?.StopRecording();
+                logStatus = "delete-failed";
+                status = "로그를 삭제하지 못했습니다. 스캔은 계속됩니다.";
+                Debug.LogWarning(LogTag + " log-delete=failure " + ex.GetType().Name);
+            }
         }
 
         void BeginSessionLog()
         {
-            sessionLog?.DisposeWriter();
-            string directory = Path.Combine(Application.persistentDataPath, "Logs");
-            sessionLog = ScanSessionLog.Start(directory, Application.version, "c9a5169+", SystemInfo.deviceModel);
-            logStatus = sessionLog.IsRecording ? "recording" : "failed";
-            if (!sessionLog.IsRecording)
+            try
             {
-                Debug.LogError(LogTag + " log-open=failure path=" + sessionLog.FilePath);
+                sessionLog?.StopRecording();
+                string directory = Path.Combine(Application.persistentDataPath, "Logs");
+                sessionLog = ScanSessionLog.Start(directory, Application.version, ReadGitSha(), SystemInfo.deviceModel);
+                logStatus = sessionLog != null && sessionLog.IsRecording ? "recording" : "failed";
+                if (sessionLog == null || !sessionLog.IsRecording)
+                {
+                    Debug.LogError(LogTag + " log-open=failure");
+                }
+            }
+            catch (Exception ex)
+            {
+                sessionLog = null;
+                logStatus = "failed";
+                Debug.LogError(LogTag + " log-open=failure " + ex.GetType().Name);
+            }
+        }
+
+        static string ReadGitSha()
+        {
+            try
+            {
+                TextAsset asset = Resources.Load<TextAsset>("git-sha");
+                if (asset == null || string.IsNullOrWhiteSpace(asset.text))
+                {
+                    return "unknown";
+                }
+
+                return asset.text.Trim();
+            }
+            catch (Exception)
+            {
+                return "unknown";
             }
         }
 
@@ -260,13 +324,19 @@ namespace RoomTwin.AR
             bool any = false;
             foreach (ARPlane plane in planeManager.trackables)
             {
+                string planeId = plane.trackableId.ToString();
+                if (waitingForRescan || rescanGate.IsRetired(planeId))
+                {
+                    continue;
+                }
+
                 if (any)
                 {
                     builder.Append(',');
                 }
 
                 any = true;
-                builder.Append("{\"id\":").Append(ScanSessionLog.Quote(plane.trackableId.ToString()));
+                builder.Append("{\"id\":").Append(ScanSessionLog.Quote(planeId));
                 builder.Append(",\"alignment\":").Append(ScanSessionLog.Quote(plane.alignment.ToString()));
                 builder.Append(",\"center\":").Append(JsonVector(plane.center));
                 builder.Append(",\"normal\":").Append(JsonVector(plane.normal));
@@ -412,6 +482,7 @@ namespace RoomTwin.AR
             {
                 meshBuilt = false;
                 capture.Reset();
+                ReleaseRoomResources();
                 DestroyChild(roomAnchor);
                 roomAnchor = null;
                 previewReady = false;
@@ -431,6 +502,7 @@ namespace RoomTwin.AR
             capture.Reset();
             previewReady = false;
             previewCorners = null;
+            ReleaseMarkerMaterials();
             ClearChildren(markerRoot);
             lastRejection = string.Empty;
             status = "마지막 벽 선택을 취소했습니다. 스캔 데이터는 유지됩니다.";
@@ -441,54 +513,108 @@ namespace RoomTwin.AR
 
         public void ConfirmPreview()
         {
-            if (!previewReady || previewCorners == null || previewCorners.Length != 4)
+            if (meshBuilt)
             {
-                status = "확정할 방 윤곽이 없습니다. 벽을 더 비춰 주세요.";
+                status = ScanFeedback.ToKorean("The room is already built.");
+                hud?.SetConfirmInteractable(false);
                 return;
             }
 
-            if (waitingForRescan || ARSession.state != ARSessionState.SessionTracking)
+            bool tracking = ARSession.state == ARSessionState.SessionTracking;
+            ObserveRescan(tracking);
+            if (!PreviewConfirmation.CanConfirm(HasValidPreview, tracking, waitingForRescan, meshBuilt))
             {
-                Reject("AR tracking is not ready. Wait before confirming a corner.");
+                InvalidatePreview("AR tracking is not ready. Wait before confirming a corner.", true);
+                PresentHud(false, 0f);
+                return;
+            }
+
+            if (!TryResolveFloorY(out float floorY, out string floorError))
+            {
+                InvalidatePreview(string.IsNullOrEmpty(floorError) ? "Scan the floor." : floorError, true);
+                PresentHud(false, 0f);
+                return;
+            }
+
+            if (!MaintainSelection())
+            {
+                sessionLog?.Reject();
+                PresentHud(true, floorY);
+                return;
+            }
+
+            if (!TryBuildOutline(floorY, out RoomReconstruction result))
+            {
+                InvalidatePreview(string.IsNullOrEmpty(result.Rejection) ? "Not enough wall information to close a room." : result.Rejection, true);
+                PresentHud(true, floorY);
+                return;
+            }
+
+            if (PreviewConfirmation.CornersMoved(previewCorners, result.Corners, PreviewConfirmation.CornerChangeMeters))
+            {
+                ApplyPreview(result, true);
+                status = ScanFeedback.ToKorean("The room outline changed.");
+                sessionLog?.Write("preview-replaced", PreviewJson(result));
+                PresentHud(true, floorY);
                 return;
             }
 
             capture.Reset();
-            for (int i = 0; i < previewCorners.Length; i++)
+            for (int i = 0; i < result.Corners.Length; i++)
             {
-                if (!capture.TryAdd(previewCorners[i], out string rejection))
+                if (!capture.TryAdd(result.Corners[i], out string rejection))
                 {
                     capture.Reset();
-                    Reject(rejection);
+                    InvalidatePreview(rejection, true);
                     return;
                 }
             }
 
+            ReleaseMarkerMaterials();
             ClearChildren(markerRoot);
             EnsureMarkerRoot();
-            for (int i = 0; i < previewCorners.Length; i++)
+            for (int i = 0; i < result.Corners.Length; i++)
             {
-                CreateMarker(i + 1, previewCorners[i], false);
+                CreateMarker(i + 1, result.Corners[i], false);
             }
 
+            previewCorners = result.Corners;
             sessionLog?.Write("confirm", "\"corners\":4");
             BuildRoom();
+            PresentHud(true, floorY);
         }
 
         public void StartNewScan()
         {
+            CollectObservedPlaneIds();
+            var retired = new List<string>(observedPlaneIds);
             ClearLocalScan();
-            waitingForRescan = arSession != null;
+            subsumedParent.Clear();
+            suppressOutline = false;
             if (arSession != null)
             {
-                arSession.Reset();
+                rescanGate.Begin(retired, Time.unscaledTime);
+                waitingForRescan = true;
+                try
+                {
+                    arSession.Reset();
+                }
+                catch (Exception ex)
+                {
+                    waitingForRescan = false;
+                    Debug.LogWarning(LogTag + " session-reset=failure " + ex.GetType().Name);
+                }
+            }
+            else
+            {
+                waitingForRescan = false;
             }
 
             BeginSessionLog();
             status = waitingForRescan
-                ? "새 스캔을 준비 중입니다. 추적이 다시 잡힐 때까지 모서리를 확정하지 않습니다."
+                ? "새 스캔을 준비 중입니다. 이전 평면이 사라질 때까지 모서리를 확정하지 않습니다."
                 : "새 스캔을 시작했습니다. 벽을 선택하세요.";
-            Debug.Log(LogTag + " new-scan session=" + (sessionLog != null ? sessionLog.SessionId : "none") + " waiting=" + waitingForRescan);
+            Debug.Log(LogTag + " new-scan session=" + (sessionLog != null ? sessionLog.SessionId : "none") + " waiting=" + waitingForRescan + " retired=" + retired.Count);
             RefreshPresentation();
         }
 
@@ -516,7 +642,10 @@ namespace RoomTwin.AR
             previewCorners = null;
             previewWallIds = null;
             previewReady = false;
+            suppressOutline = false;
             wallObservations.Clear();
+            ReleaseRoomResources();
+            ReleaseMarkerMaterials();
             hud?.ClearFailureDisplay();
             Debug.Log(LogTag + " reset referenceFloorY=cleared");
         }
@@ -559,7 +688,7 @@ namespace RoomTwin.AR
 
             if (!TryResolveFloorY(out float floorY, out string floorError))
             {
-                Reject(floorError);
+                InvalidatePreview(string.IsNullOrEmpty(floorError) ? "Scan the floor." : floorError, true);
                 Debug.LogWarning($"{LogTag} rejected floor \"{floorError}\" horizontalYs={DescribeHorizontalYs()}");
                 return;
             }
@@ -570,16 +699,24 @@ namespace RoomTwin.AR
                 return;
             }
 
-            RememberSeen(selectedPlane.trackableId.ToString());
+            string selectedId = selectedPlane.trackableId.ToString();
+            if (rescanGate.IsRetired(selectedId))
+            {
+                Reject("The selected plane belongs to the previous scan.");
+                return;
+            }
+
+            RememberSeen(selectedId);
             UpdateClusters(floorY, true);
-            WallCluster selectedCluster = wallClusters.FindByMember(selectedPlane.trackableId.ToString());
+            WallCluster selectedCluster = wallClusters.FindByMember(selectedId);
             if (selectedCluster == null || !string.IsNullOrEmpty(selectedCluster.DiscardReason))
             {
                 Reject("The selected surface is not a stable wall candidate.");
                 return;
             }
 
-            string planeId = selectedPlane.trackableId.ToString();
+            string planeId = selectedId;
+            suppressOutline = false;
             bool addedIntent = false;
             if (!intendedPlaneIds.Contains(planeId))
             {
@@ -601,15 +738,16 @@ namespace RoomTwin.AR
                 ",\"touch\":" + JsonVector(hit.pose.position) +
                 ",\"floorY\":" + floorY.ToString("0.000", CultureInfo.InvariantCulture));
             Debug.Log(LogTag + " intent plane=" + planeId + " cluster=" + selectedCluster.Id + " touch=" + Format(hit.pose.position));
-            if (!TryUpdatePreview(floorY))
-            {
-                Reject(string.IsNullOrEmpty(lastRejection) ? "Not enough wall information to close a room." : lastRejection);
-                return;
-            }
-
             if (addedIntent)
             {
-                sessionLog?.Accept();
+                sessionLog?.AcceptWallIntent();
+            }
+
+            if (!TryUpdatePreview(floorY))
+            {
+                sessionLog?.Write("withhold", "\"reason\":" + ScanSessionLog.Quote(lastRejection));
+                status = ScanFeedback.ToKorean(lastRejection);
+                return;
             }
 
             lastRejection = string.Empty;
@@ -795,11 +933,11 @@ namespace RoomTwin.AR
             Debug.Log($"{LogTag} tracking {lastSessionState} -> {args.state}");
             sessionLog?.Write("tracking", "\"from\":" + ScanSessionLog.Quote(lastSessionState.ToString()) + ",\"to\":" + ScanSessionLog.Quote(args.state.ToString()));
             lastSessionState = args.state;
-            if (waitingForRescan && args.state == ARSessionState.SessionTracking)
+            bool wasWaiting = waitingForRescan;
+            ObserveRescan(args.state == ARSessionState.SessionTracking);
+            if (wasWaiting && !waitingForRescan)
             {
-                waitingForRescan = false;
                 status = "추적이 다시 준비됐습니다. 벽을 선택하세요.";
-                Debug.Log(LogTag + " rescan-ready=true");
             }
         }
 
@@ -848,7 +986,15 @@ namespace RoomTwin.AR
 
             if (renderer.sharedMaterial == null)
             {
-                renderer.sharedMaterial = CreateUnlit("FieldTestCorner", Color.white);
+                Material markerMaterial = CreateUnlit("FieldTestCorner", Color.white);
+                if (markerMaterial == null)
+                {
+                    renderer.enabled = false;
+                    return;
+                }
+
+                markerMaterials.Add(markerMaterial);
+                renderer.sharedMaterial = markerMaterial;
             }
 
             var block = new MaterialPropertyBlock();
@@ -954,29 +1100,30 @@ namespace RoomTwin.AR
             var meshObject = new GameObject(objectName);
             meshObject.transform.SetParent(parent, false);
             meshObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            if (mesh != null)
+            {
+                ownedMeshes.Add(mesh);
+            }
+
             MeshRenderer renderer = meshObject.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = CreateScanMaterial(objectName == "Floor");
+            Material scanMaterial = CreateScanMaterial(objectName == "Floor");
+            if (scanMaterial == null)
+            {
+                renderer.enabled = false;
+                Debug.LogWarning(LogTag + " mesh-material=missing object=" + objectName);
+                return;
+            }
+
+            ownedMaterials.Add(scanMaterial);
+            renderer.sharedMaterial = scanMaterial;
         }
 
         static Material CreateScanMaterial(bool floor)
         {
-            Shader shader = Shader.Find("RoomTwin/ArPlaneTransparent");
-            if (shader == null)
-            {
-                shader = Shader.Find("Universal Render Pipeline/Unlit");
-            }
-
-            var material = new Material(shader);
             Color color = floor
                 ? new Color(0.55f, 0.62f, 0.4f, 0.16f)
                 : new Color(0.55f, 0.75f, 0.9f, 0.22f);
-            material.color = color;
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", color);
-            }
-
-            return material;
+            return ScanMaterials.CreateTransparent(color);
         }
 
         static Material CreateUnlit(string materialName, Color color)
@@ -985,6 +1132,12 @@ namespace RoomTwin.AR
             if (shader == null)
             {
                 shader = Shader.Find("Unlit/Color");
+            }
+
+            if (shader == null)
+            {
+                Debug.LogWarning(LogTag + " marker-shader=missing");
+                return null;
             }
 
             var material = new Material(shader) { name = materialName, color = color };
@@ -1044,20 +1197,59 @@ namespace RoomTwin.AR
 
         void RefreshPresentation()
         {
-            bool floorChosen = TryResolveFloorY(out float candidateFloorY, out _);
-            if (!meshBuilt && intendedPlaneIds.Count > 0 && floorChosen)
+            bool tracking = ARSession.state == ARSessionState.SessionTracking;
+            ObserveRescan(tracking);
+            if (waitingForRescan || !tracking)
             {
-                TryUpdatePreview(candidateFloorY);
+                if (previewReady || previewCorners != null)
+                {
+                    InvalidatePreview("AR tracking is not ready. Wait before confirming a corner.", false);
+                }
+
+                if (waitingForRescan)
+                {
+                    wallObservations.Clear();
+                    wallClusters.Rebuild(wallObservations, ActiveSettings(), 0f, false);
+                    floorSamples.Clear();
+                    floorObservations.Clear();
+                }
+
+                visibleWallIds.Clear();
+                outlines?.Sync(planeManager, string.Empty, string.Empty, false, true, visibleWallIds);
+                PresentHud(false, 0f);
+                return;
             }
 
+            bool floorChosen = TryResolveFloorY(out float candidateFloorY, out string floorError);
+            if (!floorChosen)
+            {
+                if (previewReady || previewCorners != null)
+                {
+                    InvalidatePreview(string.IsNullOrEmpty(floorError) ? "Scan the floor." : floorError, false);
+                }
+            }
+            else if (!meshBuilt && intendedPlaneIds.Count > 0 && !suppressOutline)
+            {
+                if (MaintainSelection())
+                {
+                    TryUpdatePreview(candidateFloorY);
+                }
+            }
+
+            PresentHud(floorChosen, candidateFloorY);
+        }
+
+        void PresentHud(bool floorChosen, float candidateFloorY)
+        {
+            bool tracking = ARSession.state == ARSessionState.SessionTracking;
             bool floorReady = capture.HasReferenceFloorY || floorChosen;
             var snapshot = new ScanSnapshot
             {
-                IsTracking = ARSession.state == ARSessionState.SessionTracking,
-                FloorLocked = floorReady,
-                FloorUncertain = !capture.HasReferenceFloorY && !floorChosen && floorObservations.Count > 0,
-                VerticalWallCount = wallClusters.Clusters.Count,
-                HasIntersectablePair = floorChosen && HasClosedRoom(candidateFloorY),
+                IsTracking = tracking && !waitingForRescan,
+                FloorLocked = floorReady && !waitingForRescan,
+                FloorUncertain = !waitingForRescan && !capture.HasReferenceFloorY && !floorChosen && floorObservations.Count > 0,
+                VerticalWallCount = waitingForRescan ? 0 : wallClusters.Clusters.Count,
+                HasIntersectablePair = !waitingForRescan && !suppressOutline && floorChosen && HasClosedRoom(candidateFloorY),
                 CornerCount = meshBuilt ? capture.Count : previewReady ? 4 : 0,
                 RoomBuilt = meshBuilt
             };
@@ -1065,9 +1257,15 @@ namespace RoomTwin.AR
             if (hud != null && hud.IsReady)
             {
                 hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
+                hud.SetConfirmInteractable(PreviewConfirmation.CanConfirm(HasValidPreview, tracking, waitingForRescan, meshBuilt));
             }
-            CollectVisibleWalls();
-            outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil, meshBuilt, visibleWallIds);
+
+            if (!waitingForRescan)
+            {
+                CollectVisibleWalls();
+                outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil, meshBuilt, visibleWallIds);
+            }
+
             WriteSnapshotIfDue();
         }
 
@@ -1088,6 +1286,11 @@ namespace RoomTwin.AR
                 }
 
                 string id = plane.trackableId.ToString();
+                if (rescanGate.IsRetired(id))
+                {
+                    continue;
+                }
+
                 RememberSeen(id);
                 float area = Mathf.Max(0f, plane.size.x * plane.size.y);
                 float seconds = ObservedSeconds(id);
@@ -1119,7 +1322,13 @@ namespace RoomTwin.AR
                     }
 
                     string id = plane.trackableId.ToString();
+                    if (rescanGate.IsRetired(id))
+                    {
+                        continue;
+                    }
+
                     RememberSeen(id);
+                    RememberSubsumed(plane);
                     wallObservations.Add(ToObservation(plane));
                 }
             }
@@ -1138,24 +1347,37 @@ namespace RoomTwin.AR
 
         bool TryUpdatePreview(float floorY)
         {
-            UpdateClusters(floorY, true);
-            CollectRequiredClusters();
-            if (!reconstructionSolver.TryBuild(
-                    wallClusters.Clusters,
-                    floorY,
-                    requiredClusterIds,
-                    ActiveSettings(),
-                    out RoomReconstruction result))
+            if (!TryBuildOutline(floorY, out RoomReconstruction result))
             {
-                previewReady = false;
-                previewCorners = null;
-                previewWallIds = null;
-                lastRejection = result.Rejection;
-                pulseMarker = null;
-                ClearChildren(markerRoot);
+                InvalidatePreview(string.IsNullOrEmpty(result.Rejection) ? "Not enough wall information to close a room." : result.Rejection, false);
                 return false;
             }
 
+            bool countOutline = !previewReady;
+            ApplyPreview(result, countOutline);
+            return true;
+        }
+
+        bool TryBuildOutline(float floorY, out RoomReconstruction result)
+        {
+            result = default;
+            UpdateClusters(floorY, true);
+            if (!CollectRequiredClusters())
+            {
+                result.Rejection = "The selected wall is no longer tracked.";
+                return false;
+            }
+
+            return reconstructionSolver.TryBuild(
+                wallClusters.Clusters,
+                floorY,
+                requiredClusterIds,
+                ActiveSettings(),
+                out result);
+        }
+
+        void ApplyPreview(RoomReconstruction result, bool countOutline)
+        {
             previewReady = true;
             previewWallIds = result.WallIds;
             lastRejection = string.Empty;
@@ -1163,6 +1385,7 @@ namespace RoomTwin.AR
             {
                 previewCorners = result.Corners;
                 pulseMarker = null;
+                ReleaseMarkerMaterials();
                 ClearChildren(markerRoot);
                 EnsureMarkerRoot();
                 for (int i = 0; i < previewCorners.Length; i++)
@@ -1171,9 +1394,30 @@ namespace RoomTwin.AR
                 }
 
                 sessionLog?.Write("preview", PreviewJson(result));
+                if (countOutline)
+                {
+                    sessionLog?.AcceptOutline();
+                }
+            }
+        }
+
+        void InvalidatePreview(string reason, bool countReject)
+        {
+            previewReady = false;
+            previewCorners = null;
+            previewWallIds = null;
+            pulseMarker = null;
+            ReleaseMarkerMaterials();
+            ClearChildren(markerRoot);
+            lastRejection = reason ?? string.Empty;
+            status = ScanFeedback.ToKorean(lastRejection);
+            if (countReject)
+            {
+                sessionLog?.Reject();
+                sessionLog?.Write("reject", "\"reason\":" + ScanSessionLog.Quote(lastRejection));
             }
 
-            return true;
+            hud?.SetConfirmInteractable(false);
         }
 
         bool HasClosedRoom(float floorY)
@@ -1187,19 +1431,218 @@ namespace RoomTwin.AR
                 out _);
         }
 
-        void CollectRequiredClusters()
+        bool CollectRequiredClusters()
         {
             requiredClusterIds.Clear();
             for (int i = 0; i < intendedPlaneIds.Count; i++)
             {
                 WallCluster cluster = wallClusters.FindByMember(intendedPlaneIds[i]);
-                if (cluster == null || requiredClusterIds.Contains(cluster.Id))
+                if (cluster == null || !string.IsNullOrEmpty(cluster.DiscardReason))
+                {
+                    requiredClusterIds.Clear();
+                    return false;
+                }
+
+                if (!requiredClusterIds.Contains(cluster.Id))
+                {
+                    requiredClusterIds.Add(cluster.Id);
+                }
+            }
+
+            return intendedPlaneIds.Count > 0;
+        }
+
+        bool MaintainSelection()
+        {
+            RememberVisibleSubsumption();
+            clusterMemberIds.Clear();
+            for (int i = 0; i < wallClusters.Clusters.Count; i++)
+            {
+                WallCluster cluster = wallClusters.Clusters[i];
+                if (!string.IsNullOrEmpty(cluster.DiscardReason))
                 {
                     continue;
                 }
 
-                requiredClusterIds.Add(cluster.Id);
+                for (int m = 0; m < cluster.MemberIds.Count; m++)
+                {
+                    clusterMemberIds.Add(cluster.MemberIds[m]);
+                }
             }
+
+            WallSelectionTransfer.Resolve(intendedPlaneIds, clusterMemberIds, subsumedParent, out bool transferred, out bool lost);
+            if (lost)
+            {
+                suppressOutline = true;
+                InvalidatePreview("The selected wall is no longer tracked.", false);
+                sessionLog?.Write("selection-lost", "\"intended\":" + intendedPlaneIds.Count.ToString(CultureInfo.InvariantCulture));
+                return false;
+            }
+
+            if (transferred)
+            {
+                previewReady = false;
+                sessionLog?.Write("selection-transfer", "\"intended\":" + intendedPlaneIds.Count.ToString(CultureInfo.InvariantCulture));
+                status = "합쳐진 평면으로 벽 선택을 옮겼습니다.";
+            }
+
+            return true;
+        }
+
+        void RememberVisibleSubsumption()
+        {
+            if (planeManager == null)
+            {
+                return;
+            }
+
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                RememberSubsumed(plane);
+            }
+        }
+
+        void RememberSubsumed(ARPlane plane)
+        {
+            if (plane == null || plane.subsumedBy == null)
+            {
+                return;
+            }
+
+            string id = plane.trackableId.ToString();
+            if (rescanGate.IsRetired(id))
+            {
+                return;
+            }
+
+            subsumedParent[id] = plane.subsumedBy.trackableId.ToString();
+        }
+
+        void ObserveRescan(bool tracking)
+        {
+            if (arSession == null)
+            {
+                waitingForRescan = false;
+                return;
+            }
+
+            bool wasWaiting = waitingForRescan;
+            CollectObservedPlaneIds();
+            rescanGate.Observe(observedPlaneIds, tracking, Time.unscaledTime);
+            waitingForRescan = rescanGate.Waiting;
+            if (wasWaiting && !waitingForRescan)
+            {
+                status = rescanGate.TimedOut
+                    ? "준비 대기 시간이 지나 새 평면만 사용합니다. 추적이 잡히면 벽을 선택하세요."
+                    : "추적이 다시 준비됐습니다. 벽을 선택하세요.";
+                sessionLog?.Write(
+                    "rescan-ready",
+                    "\"timedOut\":" + (rescanGate.TimedOut ? "true" : "false") +
+                    ",\"planesCleared\":" + (rescanGate.PlanesCleared ? "true" : "false"));
+                Debug.Log(LogTag + " rescan-ready timedOut=" + rescanGate.TimedOut + " planesCleared=" + rescanGate.PlanesCleared);
+            }
+        }
+
+        void CollectObservedPlaneIds()
+        {
+            observedPlaneIds.Clear();
+            if (planeManager == null)
+            {
+                return;
+            }
+
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                observedPlaneIds.Add(plane.trackableId.ToString());
+            }
+        }
+
+        void ReleaseRoomResources()
+        {
+            ReleaseMaterials(ownedMaterials);
+            ReleaseMeshes(ownedMeshes);
+        }
+
+        void ReleaseMarkerMaterials()
+        {
+            ReleaseMaterials(markerMaterials);
+        }
+
+        static void ReleaseMaterials(List<Material> materials)
+        {
+            for (int i = 0; i < materials.Count; i++)
+            {
+                if (materials[i] != null)
+                {
+                    Destroy(materials[i]);
+                }
+            }
+
+            materials.Clear();
+        }
+
+        static void ReleaseMeshes(List<Mesh> meshes)
+        {
+            for (int i = 0; i < meshes.Count; i++)
+            {
+                if (meshes[i] != null)
+                {
+                    Destroy(meshes[i]);
+                }
+            }
+
+            meshes.Clear();
+        }
+
+        internal void RememberPreviewForTests(Vector3[] corners)
+        {
+            previewCorners = corners;
+            previewReady = corners != null && corners.Length == 4;
+            waitingForRescan = false;
+            meshBuilt = false;
+        }
+
+        internal void TickScanForTests()
+        {
+            RefreshPresentation();
+        }
+
+        internal void BeginRescanForTests(string[] ids, float now)
+        {
+            rescanGate.Begin(ids, now);
+            waitingForRescan = true;
+        }
+
+        internal void ObserveRescanForTests(string[] ids, bool tracking, float now)
+        {
+            observedPlaneIds.Clear();
+            if (ids != null)
+            {
+                observedPlaneIds.AddRange(ids);
+            }
+
+            rescanGate.Observe(observedPlaneIds, tracking, now);
+            waitingForRescan = rescanGate.Waiting;
+        }
+
+        internal bool AllowsPlaneForTests(string id)
+        {
+            return !rescanGate.IsRetired(id);
+        }
+
+        internal void DeleteLogsForTests()
+        {
+            DeleteLogs();
+        }
+
+        internal void FailLogForTests()
+        {
+            sessionLog?.StopRecording();
+        }
+
+        internal void ProbeLogForTests()
+        {
+            sessionLog?.Write("probe", "\"ok\":true");
         }
 
         WallClusterSettings ActiveSettings()
@@ -1347,7 +1790,8 @@ namespace RoomTwin.AR
             if (sessionLog != null)
             {
                 logBuilder.Append("\n").Append(sessionLog.FilePath);
-                logBuilder.Append("\naccepted=").Append(sessionLog.AcceptedCount.ToString(CultureInfo.InvariantCulture));
+                logBuilder.Append("\nwallIntent=").Append(sessionLog.WallIntentCount.ToString(CultureInfo.InvariantCulture));
+                logBuilder.Append(" outline=").Append(sessionLog.OutlineCount.ToString(CultureInfo.InvariantCulture));
                 logBuilder.Append(" rejected=").Append(sessionLog.RejectedCount.ToString(CultureInfo.InvariantCulture));
             }
 

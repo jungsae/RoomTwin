@@ -51,6 +51,19 @@ namespace RoomTwin.AR
             }
 
             Material material = LineMaterial();
+            if (material == null)
+            {
+                foreach (KeyValuePair<TrackableId, LineRenderer> pair in lines)
+                {
+                    if (pair.Value != null)
+                    {
+                        pair.Value.enabled = false;
+                    }
+                }
+
+                return;
+            }
+
             foreach (ARPlane plane in manager.trackables)
             {
                 if (plane.alignment != PlaneAlignment.Vertical)
@@ -161,13 +174,11 @@ namespace RoomTwin.AR
                 return runtimeMaterial;
             }
 
-            Shader shader = Shader.Find("RoomTwin/ArPlaneTransparent");
-            if (shader == null)
+            runtimeMaterial = ScanMaterials.CreateTransparent(new Color(0.7f, 0.9f, 1f, 0.45f));
+            if (runtimeMaterial == null)
             {
-                shader = Shader.Find("Universal Render Pipeline/Unlit");
+                return null;
             }
-
-            runtimeMaterial = new Material(shader);
             Color color = new Color(0.7f, 0.9f, 1f, 0.45f);
             runtimeMaterial.color = color;
             if (runtimeMaterial.HasProperty("_BaseColor"))
@@ -176,6 +187,15 @@ namespace RoomTwin.AR
             }
 
             return runtimeMaterial;
+        }
+
+        void OnDestroy()
+        {
+            if (runtimeMaterial != null)
+            {
+                Destroy(runtimeMaterial);
+                runtimeMaterial = null;
+            }
         }
     }
 }

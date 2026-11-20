@@ -19,16 +19,16 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.time.measureTimedValue
 
-internal enum class InferenceBackend {
+enum class InferenceBackend {
     CPU, GPU;
 
-    fun runtimeBackend(): Backend = when (this) {
+    internal fun runtimeBackend(): Backend = when (this) {
         CPU -> Backend.CPU()
         GPU -> Backend.GPU()
     }
 }
 
-internal data class GemmaInference(
+data class GemmaInference(
     val rawResponse: String,
     val imageMillis: Long?,
     val initializationMillis: Long?,
@@ -38,7 +38,7 @@ internal data class GemmaInference(
 )
 
 // All calls are confined to the app's inference worker.
-internal class GemmaRunner(private val context: Context) : AutoCloseable {
+class GemmaRunner(private val context: Context, private val modelFile: File? = null) : AutoCloseable {
     private var engine: Engine? = null
     private var backend = InferenceBackend.CPU
 
@@ -50,23 +50,34 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
         Log.i(TAG, "selected=$backend")
     }
 
-    fun analyzeRoom(image: Uri, prompt: String = RoomAnalysisJson.prompt): GemmaInference = infer(
-        prompt, image, maxOutputTokens = 768,
+    fun initialize() {
+        if (engine == null) initializeEngine()
+    }
+
+    fun analyzeRoom(
+        image: Uri,
+        prompt: String = RoomAnalysisJson.prompt,
+        expectedMimeType: String? = null,
+    ): GemmaInference = infer(
+        prompt, image, maxOutputTokens = 768, expectedMimeType = expectedMimeType,
         responseFormat = ResponseFormat.json(RoomAnalysisJson.generationSchema),
     )
 
+    fun infer(prompt: String, imageUri: Uri?): GemmaInference = infer(prompt, imageUri, maxOutputTokens = 256)
+
     @OptIn(ExperimentalApi::class)
-    fun infer(
+    private fun infer(
         prompt: String,
         imageUri: Uri?,
-        maxOutputTokens: Int = 256,
+        maxOutputTokens: Int,
         responseFormat: ResponseFormat? = null,
+        expectedMimeType: String? = null,
     ): GemmaInference {
         val image = imageUri?.let { uri ->
             try {
-                measureTimedValue { readImage(uri) }
+                measureTimedValue { readImage(uri, expectedMimeType) }
             } catch (error: Exception) {
-                throw Failure(R.string.image_failed, cause = error)
+                throw Failure(Error.IMAGE_UNREADABLE, cause = error)
             }
         }
         val existingEngine = engine
@@ -98,7 +109,7 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
                 }
             }
         } catch (error: Exception) {
-            throw Failure(R.string.inference_failed, error.javaClass.simpleName, error)
+            throw Failure(Error.INFERENCE_FAILED, error.javaClass.simpleName, error)
         }
         Log.i(TAG, "completed backend=$backend")
         return GemmaInference(
@@ -111,11 +122,9 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
     }
 
     private fun initializeEngine(): Engine {
-        val modelDirectory = context.getExternalFilesDir(null)
-            ?: throw Failure(R.string.storage_unavailable)
-        val model = File(modelDirectory, MODEL_NAME)
+        val model = modelFile ?: defaultModelFile()
         if (!model.isFile || !model.canRead() || model.length() == 0L) {
-            throw Failure(R.string.model_missing, model.absolutePath)
+            throw Failure(Error.MODEL_MISSING, model.absolutePath)
         }
 
         val initialized = try {
@@ -139,14 +148,20 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
         return initialized
     }
 
-    private fun initializationFailure(error: Throwable): Failure {
-        Log.e(TAG, "initialize failed backend=$backend cause=${error.javaClass.simpleName}")
-        return Failure(R.string.model_failed, "$backend · ${error.message ?: error.javaClass.simpleName}", error)
+    private fun defaultModelFile(): File {
+        val directory = context.getExternalFilesDir(null) ?: throw Failure(Error.STORAGE_UNAVAILABLE)
+        return File(directory, MODEL_NAME)
     }
 
-    private fun readImage(uri: Uri): ByteArray {
+    private fun initializationFailure(error: Throwable): Failure {
+        Log.e(TAG, "initialize failed backend=$backend cause=${error.javaClass.simpleName}")
+        return Failure(Error.MODEL_INIT_FAILED, "$backend · ${error.message ?: error.javaClass.simpleName}", error)
+    }
+
+    private fun readImage(uri: Uri, expectedMimeType: String?): ByteArray {
         val source = ImageDecoder.createSource(context.contentResolver, uri)
         val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            require(expectedMimeType == null || info.mimeType == expectedMimeType)
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             val width = info.size.width
             val height = info.size.height
@@ -170,15 +185,17 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
 
     override fun close() {
         val activeEngine = engine
-        engine = null
         activeEngine?.let {
             it.close()
+            engine = null
             Log.i(TAG, "closed backend=$backend")
         }
     }
 
-    internal class Failure(
-        val messageId: Int,
+    enum class Error { STORAGE_UNAVAILABLE, MODEL_MISSING, MODEL_INIT_FAILED, IMAGE_UNREADABLE, INFERENCE_FAILED }
+
+    class Failure(
+        val code: Error,
         val detail: String? = null,
         cause: Throwable? = null,
     ) : Exception(cause)

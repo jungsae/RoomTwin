@@ -10,8 +10,14 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        if (providers.gradleProperty("usePublishedBridge").orNull == "true") {
+            maven {
+                url = uri("bridge/build/unity-repository")
+                content { includeModule("com.roomtwin", "native-ai") }
+            }
+        }
     }
 }
 
 rootProject.name = "RoomTwinNativeAi"
-include(":app")
+include(":app", ":bridge")

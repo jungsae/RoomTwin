@@ -18,6 +18,14 @@ android {
         }
     }
 
+    buildTypes {
+        create("field") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".field"
+            matchingFallbacks += "debug"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

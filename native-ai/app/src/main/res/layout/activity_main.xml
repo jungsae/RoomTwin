@@ -17,6 +17,28 @@
             android:text="@string/app_name"
             android:textAppearance="?android:attr/textAppearanceLarge" />
 
+        <RadioGroup
+            android:id="@+id/backends"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checkedButton="@id/cpu"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/cpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/backend_cpu" />
+
+            <RadioButton
+                android:id="@+id/gpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/backend_gpu" />
+        </RadioGroup>
+
         <EditText
             android:id="@+id/prompt"
             android:layout_width="match_parent"

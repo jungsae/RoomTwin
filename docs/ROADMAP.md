@@ -52,7 +52,7 @@ The phase numbers above are kept. Two labels currently overlap, and this file do
 - The Phase 1 heading says Geometry, while its bullets still describe AR measurement capture.
 - Phase 2 is 3D room generation, and its last bullet is the Editor `GeometrySandbox` that has already been built.
 
-D-009 records the proposal. Device checks and Editor tests are not GitHub Actions results.
+D-009 records the proposal: restore the Phase 1 heading to AR Measurement and leave the sandbox bullet under Phase 2, only after the user chooses. The next implementation branch is `feat/ar-fieldtest`. It does not add a phase. Device checks and Editor tests are not GitHub Actions results.
 
 ## Current Focus
 

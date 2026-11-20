@@ -43,8 +43,8 @@
   Record what passed and what was not run.
 - Link the issue with `Refs #`. Do not use
   `Fixes` or `Closes` in the draft.
-- Do not merge into `main`, push `main`, or
-  force-push without an explicit user approval.
+- Do not push `main` and do not force-push.
+  Merge only after the user approves that merge.
 - Do not edit another agent's worktree.
 - Procedure: `docs/DEVELOPMENT_WORKFLOW.md`.
 

@@ -1,6 +1,10 @@
 # JVM unit tests, debug APK, and Android Lint for native-ai.
 # This does not install Gemma weights and does not run a device.
 # Unity Editor and Galaxy S20+ checks stay outside this workflow.
+# This file runs only after it is on the pull request's base or head.
+# feat/native-ai (PR #2) does not contain it, so that PR will not run
+# this job until the workflow is on main. There is no Gradle wrapper;
+# the job uses Gradle 9.3.1 from the setup action.
 
 name: native-ai
 

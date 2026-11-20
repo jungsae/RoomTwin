@@ -59,7 +59,8 @@ Format: decision, status, context. Keep facts and assumptions separate.
 - **Status**: Proposed
 - **Decision**: Keep the existing phase numbers. Do not rename Phase 1 and Phase 2 in bulk in this change.
 - **Why**: The Phase 1 heading says Geometry, but its bullets are still AR measurement. Phase 2 is 3D room generation and also contains the finished Editor `GeometrySandbox` bullet. Renumbering would rewrite history without a product decision.
-- **Proposal**: Leave the numbers. On a later docs pass, either restore the Phase 1 title to AR measurement or move only the sandbox status line, after the user picks one. Code already treats `GeometrySandbox` as an Editor room model with no AR input.
+- **Proposal**: Leave the numbers. The recommended later edit, after the user chooses, is to restore the Phase 1 heading to AR Measurement and keep the finished `GeometrySandbox` bullet under Phase 2. Do not apply that edit before the choice.
+- **Note**: The next code task is `feat/ar-fieldtest`: four floor corners from AR raycast, then the existing room mesh, then a device APK. It does not add a phase number. The 2026-11-21–22 field test comes before more workflow or roadmap edits.
 
 ## Verified Facts (repo / local evidence)
 

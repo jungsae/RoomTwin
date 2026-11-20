@@ -47,7 +47,7 @@ Unity Editor tests stay on the developer's machine. This repository does not add
 
 1. Review `git status` and `git diff`. Leave unrelated user changes unstaged. Do not commit `native-ai` model weights, credentials, or the other agent's files.
 2. Commit with a Conventional Commits subject. Explain why in the body when the subject is not enough.
-3. Push the feature branch: `git push -u origin HEAD`. Never `git push origin main`. Never force-push.
+3. Push only after confirming the current branch is not `main`: `git push -u origin HEAD`. If the branch is `main`, stop. Never force-push.
 4. Open one draft pull request into `main`: `gh pr create --draft --base main`. If a PR for the same branch already exists, update that PR. Do not open a second one.
 5. Fill `.github/pull_request_template.md`. Link the issue with `Refs #123`. Do not write `Fixes`, `Closes`, or `Resolves`; those keywords close the issue when the PR merges, and draft creation must not be treated as completion.
 6. Tell the user the PR URL and what to review. Stop there.

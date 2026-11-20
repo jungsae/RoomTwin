@@ -38,6 +38,7 @@ dependencies {
     } else {
         implementation(project(":bridge"))
     }
+    implementation("androidx.core:core:1.17.0")
     testImplementation("junit:junit:4.13.2")
     "fieldImplementation"("com.google.code.gson:gson:2.14.0")
     "fieldImplementation"("com.google.ai.edge.litertlm:litertlm-android:0.19.0")

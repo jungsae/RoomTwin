@@ -43,6 +43,18 @@
 
 Developer result on 2026-11-20, Unity `6000.6.9f1`, commit `69c80fa`: the floor and four walls were visible; corner and height edits rebuilt; a bad corner order warned; the sample was restored to 4 m × 3 m × 2.4 m. Edit Mode `RoomTwin.Geometry.Tests` reported 7 passed, 0 failed, 0.016 s. The Console showed 0 errors. This was a local Test Runner run, not CI.
 
+## AR Field Test v0.1
+
+Not a survey. The user taps four floor points. ARCore does not detect the real wall corners, and a raycast can miss outside a detected plane.
+
+1. Build `Assets/RoomTwin/Scenes/ARFieldTest.unity` with `RoomTwin/FieldTest/Build Android APK`.
+2. On the phone, wait for Tracking and at least one horizontal floor.
+3. Tap four floor corners in boundary order. Read edge lengths from `[RoomTwin][FieldTest] edges-horizontal-m` and compare them with a tape.
+4. Walk sideways. The mesh stays on the floor while the camera moves.
+5. Tap Reset and repeat. A crossed or too-close selection must not build a mesh.
+
+Editor checks for the coordinate mapping are in `FieldTestFrameTests`. They do not replace the device pass.
+
 ## CI strategy
 
 - `native-ai` pull requests that change `native-ai/**` use `.github/workflows/native-ai-ci.yml`: JDK 17, Gradle 9.3.1, Android SDK 36, `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:lintDebug`. No model weight is downloaded. A green run does not cover Galaxy S20+ inference.

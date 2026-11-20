@@ -53,7 +53,7 @@ namespace RoomTwin.AR
         readonly FloorCornerCapture capture = new FloorCornerCapture();
         readonly StringBuilder logBuilder = new StringBuilder(512);
         readonly List<WallCornerSolver.FloorSample> floorSamples = new List<WallCornerSolver.FloorSample>(8);
-        readonly List<Vector3> verticalNormals = new List<Vector3>(8);
+        readonly List<DetectedWall> verticalWalls = new List<DetectedWall>(8);
         ArScanHud hud;
         ArScanWallOutlines outlines;
         string highlightedSelected = string.Empty;
@@ -681,26 +681,23 @@ namespace RoomTwin.AR
                 return;
             }
 
-            bool floorReady = capture.HasReferenceFloorY || FloorCanBeChosen();
+            CollectFloorSamples();
+            bool floorChosen = WallCornerSolver.TryChooseFloorY(
+                floorSamples, floorHeightToleranceMeters, out float candidateFloorY, out _);
+            bool floorReady = capture.HasReferenceFloorY || floorChosen;
             var snapshot = new ScanSnapshot
             {
                 IsTracking = ARSession.state == ARSessionState.SessionTracking,
                 FloorLocked = floorReady,
-                FloorUncertain = !capture.HasReferenceFloorY && !floorReady && floorSamples.Count > 0,
+                FloorUncertain = !capture.HasReferenceFloorY && !floorChosen && floorSamples.Count > 0,
                 VerticalWallCount = CountVerticalWalls(),
-                HasIntersectablePair = HasIntersectableWallPair(),
+                HasIntersectablePair = HasSolverValidPair(),
                 CornerCount = capture.Count,
                 RoomBuilt = meshBuilt
             };
             string failure = string.IsNullOrEmpty(lastRejection) ? null : ScanFeedback.ToKorean(lastRejection);
-            hud.Apply(snapshot, failure, null);
+            hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
             outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil);
-        }
-
-        bool FloorCanBeChosen()
-        {
-            CollectFloorSamples();
-            return WallCornerSolver.TryChooseFloorY(floorSamples, floorHeightToleranceMeters, out _, out _);
         }
 
         void CollectFloorSamples()
@@ -745,27 +742,28 @@ namespace RoomTwin.AR
             return count;
         }
 
-        bool HasIntersectableWallPair()
+        bool HasSolverValidPair()
         {
-            verticalNormals.Clear();
-            if (planeManager == null)
+            if (planeManager == null || !TryResolveFloorY(out float floorY, out _))
             {
                 return false;
             }
 
+            verticalWalls.Clear();
             foreach (ARPlane plane in planeManager.trackables)
             {
                 if (plane.alignment == PlaneAlignment.Vertical)
                 {
-                    verticalNormals.Add(plane.normal);
+                    verticalWalls.Add(ToWall(plane));
                 }
             }
 
-            for (int i = 0; i < verticalNormals.Count; i++)
+            for (int i = 0; i < verticalWalls.Count; i++)
             {
-                for (int j = i + 1; j < verticalNormals.Count; j++)
+                for (int j = i + 1; j < verticalWalls.Count; j++)
                 {
-                    if (Vector3.Cross(verticalNormals[i], verticalNormals[j]).magnitude >= WallCornerSolver.MinNormalCrossMagnitude)
+                    if (WallCornerSolver.TryPair(verticalWalls[i], verticalWalls[j], floorY, out WallCornerEstimate estimate)
+                        && estimate.Accepted)
                     {
                         return true;
                     }
@@ -773,6 +771,40 @@ namespace RoomTwin.AR
             }
 
             return false;
+        }
+
+        string BuildDebugText(float candidateFloorY, bool floorChosen)
+        {
+            logBuilder.Clear();
+            logBuilder.Append("Tracking: ").Append(ARSession.state);
+            logBuilder.Append("\nFloor locked Y: ");
+            if (capture.HasReferenceFloorY)
+            {
+                logBuilder.Append(capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                logBuilder.Append("no");
+            }
+
+            logBuilder.Append("\nFloor candidate Y: ");
+            logBuilder.Append(floorChosen
+                ? candidateFloorY.ToString("0.000", CultureInfo.InvariantCulture)
+                : "not chosen");
+            logBuilder.Append("\nFloor samples:");
+            for (int i = 0; i < floorSamples.Count; i++)
+            {
+                logBuilder.Append("\n  y=");
+                logBuilder.Append(floorSamples[i].Height.ToString("0.000", CultureInfo.InvariantCulture));
+                logBuilder.Append(" area=");
+                logBuilder.Append(floorSamples[i].AreaSquareMeters.ToString("0.00", CultureInfo.InvariantCulture));
+            }
+
+            logBuilder.Append("\nVertical walls: ").Append(CountVerticalWalls());
+            logBuilder.Append("\nCorners: ").Append(capture.Count).Append("/4");
+            logBuilder.Append("\nLast failure: ");
+            logBuilder.Append(string.IsNullOrEmpty(lastRejection) ? "none" : lastRejection);
+            return logBuilder.ToString();
         }
 
         static bool TryGetPressScreenPosition(out Vector2 screenPosition)

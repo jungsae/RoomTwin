@@ -55,6 +55,8 @@ namespace RoomTwin.Geometry.Tests
 
             Assert.AreEqual(ScanPhase.ReadyToEstimate, ScanFeedback.Resolve(snapshot));
             Assert.AreEqual("2/4", ScanFeedback.ProgressLabel(snapshot.CornerCount));
+            string ready = ScanFeedback.Guidance(ScanPhase.ReadyToEstimate, 0, null);
+            StringAssert.Contains("생기지 않습니다", ready);
             StringAssert.Contains("2/4", ScanFeedback.Guidance(ScanPhase.ReadyToEstimate, 2, null));
         }
 

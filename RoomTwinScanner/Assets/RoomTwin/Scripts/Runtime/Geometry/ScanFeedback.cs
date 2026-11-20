@@ -72,7 +72,7 @@ namespace RoomTwin.Geometry
                 ScanPhase.FloorUncertain => "바닥 높이가 불확실합니다",
                 ScanPhase.NeedWall => "벽을 비춰 주세요",
                 ScanPhase.NeedAdjacentWall => "인접한 벽을 더 스캔하세요",
-                ScanPhase.ReadyToEstimate => "벽을 선택하면 모서리를 계산합니다",
+                ScanPhase.ReadyToEstimate => "방향이 다른 벽이 있습니다",
                 ScanPhase.RoomBuilt => "방 윤곽을 만들었습니다",
                 _ => "스캔 중"
             };
@@ -97,7 +97,7 @@ namespace RoomTwin.Geometry
                 ScanPhase.FloorUncertain => "바닥과 다른 수평면이 함께 보입니다. 방 바닥을 더 넓게 비춰 주세요.",
                 ScanPhase.NeedWall => "벽면이 보이도록 카메라를 옮겨 주세요.",
                 ScanPhase.NeedAdjacentWall => "만나는 다른 벽을 더 스캔하세요.",
-                ScanPhase.ReadyToEstimate => "벽면을 누르면 교차 모서리를 계산합니다.",
+                ScanPhase.ReadyToEstimate => "벽을 선택하면 교차를 계산합니다. 경계 밖이면 모서리는 생기지 않습니다.",
                 ScanPhase.RoomBuilt => "방을 걸어 보며 윤곽이 바닥에 고정되는지 확인하세요.",
                 _ => "벽과 바닥을 스캔하세요."
             };

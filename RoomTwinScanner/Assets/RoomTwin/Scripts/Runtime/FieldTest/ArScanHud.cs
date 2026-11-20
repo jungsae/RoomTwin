@@ -1,6 +1,8 @@
 using RoomTwin.Geometry;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 
 namespace RoomTwin.AR
@@ -28,6 +30,7 @@ namespace RoomTwin.AR
         ScanPhase shownPhase;
         int shownCorners = -1;
         string shownFailure;
+        string shownDebug;
         bool shownDeveloper;
         Rect lastSafeArea;
 
@@ -37,6 +40,8 @@ namespace RoomTwin.AR
             {
                 return;
             }
+
+            EnsureEventSystem();
 
             var canvasObject = new GameObject("ScanHud");
             canvasObject.transform.SetParent(transform, false);
@@ -95,7 +100,12 @@ namespace RoomTwin.AR
             EnsureBuilt();
             ApplySafeArea();
             ScanPhase phase = ScanFeedback.Resolve(snapshot);
-            if (phase == shownPhase && snapshot.CornerCount == shownCorners && failure == shownFailure && developerVisible == shownDeveloper)
+            bool debugChanged = developerVisible && debugText != shownDebug;
+            if (phase == shownPhase
+                && snapshot.CornerCount == shownCorners
+                && failure == shownFailure
+                && developerVisible == shownDeveloper
+                && !debugChanged)
             {
                 return;
             }
@@ -104,6 +114,7 @@ namespace RoomTwin.AR
             shownCorners = snapshot.CornerCount;
             shownFailure = failure;
             shownDeveloper = developerVisible;
+            shownDebug = debugText;
             headline.Text = ScanFeedback.Headline(phase);
             guidance.Text = ScanFeedback.Guidance(phase, snapshot.CornerCount, failure);
             progress.Text = ScanFeedback.ProgressLabel(snapshot.CornerCount);
@@ -111,6 +122,19 @@ namespace RoomTwin.AR
             {
                 debug.Text = debugText ?? string.Empty;
             }
+        }
+
+        static void EnsureEventSystem()
+        {
+            if (FindFirstObjectByType<EventSystem>() != null)
+            {
+                return;
+            }
+
+            var eventObject = new GameObject("EventSystem");
+            eventObject.AddComponent<EventSystem>();
+            var module = eventObject.AddComponent<InputSystemUIInputModule>();
+            module.AssignDefaultActions();
         }
 
         public void ClearFailureDisplay()
@@ -212,7 +236,7 @@ namespace RoomTwin.AR
             else
             {
                 var text = rect.gameObject.AddComponent<Text>();
-                text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                text.font = Resources.Load<Font>("Fonts/NotoSansKR-Regular");
                 text.fontSize = Mathf.RoundToInt(fontSize);
                 text.alignment = TextAnchor.MiddleCenter;
                 text.color = Color.white;
@@ -248,18 +272,20 @@ namespace RoomTwin.AR
                 return sharedFont;
             }
 
-            Font source = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            Font source = Resources.Load<Font>("Fonts/NotoSansKR-Regular");
             if (source == null)
             {
-                source = Resources.GetBuiltinResource<Font>("Arial.ttf");
-            }
-
-            if (source == null)
-            {
+                Debug.LogError("[RoomTwin][FieldTest] koreanFont included=no path=Fonts/NotoSansKR-Regular");
                 return null;
             }
 
+            Debug.Log("[RoomTwin][FieldTest] koreanFont included=yes name=" + source.name);
             sharedFont = TMP_FontAsset.CreateFontAsset(source);
+            if (sharedFont != null)
+            {
+                sharedFont.atlasPopulationMode = AtlasPopulationMode.Dynamic;
+            }
+
             return sharedFont;
         }
 

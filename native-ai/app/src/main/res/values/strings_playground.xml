@@ -19,7 +19,7 @@
     <string name="chat_no_camera">기기에서 카메라를 열 수 없습니다.</string>
     <string name="chat_image_loading">이미지를 불러오는 중</string>
     <string name="chat_reset_confirmation">현재 대화와 사진 문맥을 지우고 새 대화를 시작할까요?</string>
-    <string name="chat_room_confirmation">Room Analysis로 전환하면 현재 Playground 대화가 초기화됩니다.</string>
+    <string name="chat_leave_mode">모드를 전환하면 현재 Playground 대화가 초기화됩니다.</string>
     <string name="chat_continue">전환</string>
     <string name="chat_reset_after_error">%1$s 새 대화에서 다시 시도할 수 있습니다.</string>
     <string name="chat_settings_note">설정을 바꾸면 새 대화를 시작합니다. 컨텍스트가 길수록 메모리를 더 사용합니다.</string>

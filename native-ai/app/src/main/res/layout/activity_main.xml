@@ -32,6 +32,15 @@
             android:minHeight="48dp"
             android:saveEnabled="false"
             android:text="@string/playground_mode" />
+
+        <RadioButton
+            android:id="@+id/vision_lab_mode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/vision_lab_mode" />
     </RadioGroup>
 
     <include
@@ -41,5 +50,10 @@
     <include
         android:id="@+id/playground_panel"
         layout="@layout/view_playground"
+        android:visibility="gone" />
+
+    <include
+        android:id="@+id/vision_lab_panel"
+        layout="@layout/view_vision_lab"
         android:visibility="gone" />
 </LinearLayout>

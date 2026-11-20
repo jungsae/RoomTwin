@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
+import kotlin.time.TimeSource
 import kotlin.time.measureTimedValue
 
 enum class InferenceBackend {
@@ -43,6 +44,15 @@ data class GemmaInference(
     val decodeTokens: Int?,
 )
 
+data class VisionInference(
+    val text: String,
+    val totalMillis: Long,
+    val firstVisibleMillis: Long?,
+    val decodeTokens: Int?,
+    val decodeTokensPerSecond: Double?,
+    val backend: InferenceBackend,
+)
+
 // All calls are confined to the app's inference worker.
 class GemmaRunner(private val context: Context, private val modelFile: File? = null) : AutoCloseable {
     private var engine: Engine? = null
@@ -50,6 +60,10 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
     private var contextLength = PlaygroundSettings.DEFAULT_CONTEXT_LENGTH
     private var chat: Conversation? = null
     private var chatSettings: PlaygroundSettings? = null
+    private var chatKey: String? = null
+    private var chatSchema: String? = null
+    private var imageCapacity = 1
+    private var visionMetrics = false
 
     fun selectBackend(selected: InferenceBackend) {
         if (backend != selected) {
@@ -74,7 +88,7 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
 
     fun infer(prompt: String, imageUri: Uri?): GemmaInference = infer(prompt, imageUri, maxOutputTokens = 256)
 
-    // A Playground conversation owns its own history. The engine is shared with one-shot inference.
+    // Continuous Playground and Lab conversations both use this engine, with separate keys.
     fun chat(
         settings: PlaygroundSettings,
         question: String,
@@ -82,16 +96,51 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         onText: (String) -> Unit,
     ) {
         require(question.isNotBlank() && question.length <= PlaygroundSettings.MAX_QUESTION_LENGTH)
-        val image = imageUri?.let { uri ->
-            try {
-                readImage(uri, expectedMimeType = null)
-            } catch (error: Exception) {
-                throw Failure(Error.IMAGE_UNREADABLE, cause = error)
+        stream(settings, "playground", question, listOfNotNull(imageUri), null, false, onText)
+    }
+
+    fun streamVisionLab(
+        settings: PlaygroundSettings,
+        feature: String,
+        question: String,
+        images: List<Uri>,
+        schema: String? = null,
+        keepHistory: Boolean = false,
+        onText: (String) -> Unit = {},
+    ): VisionInference {
+        if (!keepHistory) resetPlayground()
+        try {
+            return stream(settings, "vision:$feature", question, images, schema, true, onText)
+        } finally {
+            if (!keepHistory) resetPlayground()
+        }
+    }
+
+    @OptIn(ExperimentalApi::class)
+    private fun stream(
+        settings: PlaygroundSettings,
+        key: String,
+        question: String,
+        images: List<Uri>,
+        schema: String?,
+        metrics: Boolean,
+        onText: (String) -> Unit,
+    ): VisionInference {
+        require(question.isNotBlank() && images.size <= 2)
+        val started = TimeSource.Monotonic.markNow()
+        val input = buildList {
+            for (uri in images) {
+                try {
+                    add(Content.ImageBytes(readImage(uri, expectedMimeType = null)))
+                } catch (error: Exception) {
+                    throw Failure(Error.IMAGE_UNREADABLE, cause = error)
+                }
             }
+            add(Content.Text(question))
         }
         selectBackend(settings.backend)
-        configureContext(settings.contextLength)
-        if (chatSettings != settings) resetPlayground()
+        configureEngine(settings.contextLength, images.size.coerceAtLeast(1), metrics)
+        if (chatSettings != settings || chatKey != key || chatSchema != schema) resetPlayground()
         val activeEngine = engine ?: initializeEngine()
         try {
             val conversation = chat ?: activeEngine.createConversation(
@@ -101,37 +150,57 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
                     automaticToolCalling = false,
                     maxOutputToken = settings.maxOutputTokens,
                     thinkingConfig = ThinkingConfig(enableThinking = settings.thinking),
+                    enableResponseFormat = schema != null,
                 ),
             ).also {
                 chat = it
                 chatSettings = settings
-            }
-            val input = buildList {
-                image?.let { add(Content.ImageBytes(it)) }
-                add(Content.Text(question))
+                chatKey = key
+                chatSchema = schema
             }
             val finished = CompletableFuture<Unit>()
-            conversation.sendMessageAsync(Contents.of(input), object : MessageCallback {
-                override fun onMessage(message: Message) {
-                    for (content in message.contents.contents) {
-                        if (content is Content.Text && content.text.isNotEmpty()) onText(content.text)
+            val response = StringBuilder()
+            var firstVisibleMillis: Long? = null
+            conversation.sendMessageAsync(
+                Contents.of(input),
+                object : MessageCallback {
+                    override fun onMessage(message: Message) {
+                        for (content in message.contents.contents) {
+                            if (content !is Content.Text || content.text.isEmpty()) continue
+                            if (firstVisibleMillis == null && content.text.isNotBlank()) {
+                                firstVisibleMillis = started.elapsedNow().inWholeMilliseconds
+                            }
+                            response.append(content.text)
+                            onText(content.text)
+                        }
                     }
-                }
 
-                override fun onDone() {
-                    finished.complete(Unit)
-                }
+                    override fun onDone() {
+                        finished.complete(Unit)
+                    }
 
-                override fun onError(throwable: Throwable) {
-                    finished.completeExceptionally(throwable)
-                }
-            })
-            // Wait on the worker so another request cannot use or close the engine during a stream.
+                    override fun onError(throwable: Throwable) {
+                        finished.completeExceptionally(throwable)
+                    }
+                },
+                responseFormat = schema?.let { ResponseFormat.json(it) },
+            )
+            // The app owns one worker. Close or reuse the engine only after the terminal callback.
             try {
                 finished.join()
             } catch (error: CompletionException) {
                 throw error.cause ?: error
             }
+            val elapsed = started.elapsedNow().inWholeMilliseconds
+            val benchmark = if (metrics) runCatching { conversation.getBenchmarkInfo() }.getOrNull() else null
+            return VisionInference(
+                response.toString(),
+                elapsed,
+                firstVisibleMillis,
+                benchmark?.lastDecodeTokenCount?.takeIf { it > 0 },
+                benchmark?.lastDecodeTokensPerSecond?.takeIf { it.isFinite() && it > 0 },
+                backend,
+            )
         } catch (error: Exception) {
             runCatching { resetPlayground() }
             throw Failure(Error.INFERENCE_FAILED, error.javaClass.simpleName, error)
@@ -142,13 +211,17 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         val current = chat
         chat = null
         chatSettings = null
+        chatKey = null
+        chatSchema = null
         current?.close()
     }
 
-    private fun configureContext(tokens: Int) {
-        if (contextLength != tokens) {
+    private fun configureEngine(tokens: Int, images: Int = 1, metrics: Boolean = false) {
+        if (contextLength != tokens || imageCapacity != images || visionMetrics != metrics) {
             close()
             contextLength = tokens
+            imageCapacity = images
+            visionMetrics = metrics
         }
     }
 
@@ -161,7 +234,7 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         expectedMimeType: String? = null,
     ): GemmaInference {
         resetPlayground()
-        configureContext(PlaygroundSettings.DEFAULT_CONTEXT_LENGTH)
+        configureEngine(PlaygroundSettings.DEFAULT_CONTEXT_LENGTH)
         val image = imageUri?.let { uri ->
             try {
                 measureTimedValue { readImage(uri, expectedMimeType) }
@@ -210,20 +283,23 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         )
     }
 
+    @OptIn(ExperimentalApi::class)
     private fun initializeEngine(): Engine {
         val model = modelFile ?: defaultModelFile()
         if (!model.isFile || !model.canRead() || model.length() == 0L) {
             throw Failure(Error.MODEL_MISSING, model.absolutePath)
         }
 
+        val previousBenchmarkFlag = ExperimentalFlags.enableBenchmark
         val initialized = try {
+            if (visionMetrics) ExperimentalFlags.enableBenchmark = true
             Engine(
                 EngineConfig(
                     modelPath = model.absolutePath,
                     backend = backend.runtimeBackend(),
                     visionBackend = backend.runtimeBackend(),
                     maxNumTokens = contextLength,
-                    maxNumImages = 1,
+                    maxNumImages = imageCapacity,
                     cacheDir = File(context.cacheDir, cacheName()).apply { mkdirs() }.absolutePath,
                 ),
             ).apply { initialize() }
@@ -231,16 +307,18 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
             throw initializationFailure(error)
         } catch (error: LinkageError) {
             throw initializationFailure(error)
+        } finally {
+            if (visionMetrics) ExperimentalFlags.enableBenchmark = previousBenchmarkFlag
         }
         Log.i(TAG, "initialized backend=$backend vision=$backend")
         engine = initialized
         return initialized
     }
 
-    private fun cacheName(): String = if (contextLength == PlaygroundSettings.DEFAULT_CONTEXT_LENGTH) {
-        backend.name
-    } else {
-        "${backend.name}-$contextLength"
+    private fun cacheName(): String = when {
+        imageCapacity > 1 -> "${backend.name}-$contextLength-images$imageCapacity"
+        contextLength == PlaygroundSettings.DEFAULT_CONTEXT_LENGTH -> backend.name
+        else -> "${backend.name}-$contextLength"
     }
 
     private fun defaultModelFile(): File {

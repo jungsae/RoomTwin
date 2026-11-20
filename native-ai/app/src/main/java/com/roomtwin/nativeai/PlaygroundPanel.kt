@@ -5,8 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.os.Handler
-import android.os.Looper
 import android.text.InputFilter
 import android.view.View
 import android.widget.Button
@@ -95,12 +93,12 @@ internal class PlaygroundPanel(private val activity: Activity, private val root:
         setStatus(null)
     }
 
-    fun startReply(text: String, includesImage: Boolean): StreamReply {
+    fun startReply(text: String, includesImage: Boolean): StreamedReply {
         messages.removeView(emptyHint)
         hasTurns = true
         val userText = if (includesImage) activity.getString(R.string.chat_attached) + "\n" + text else text
         addBubble(R.string.chat_you, own = true).text = userText
-        return StreamReply(addBubble(R.string.chat_model, own = false))
+        return StreamedReply(activity, addBubble(R.string.chat_model, own = false), ::scrollToLatest)
     }
 
     private fun addBubble(label: Int, own: Boolean): TextView {
@@ -141,37 +139,4 @@ internal class PlaygroundPanel(private val activity: Activity, private val root:
 
     private fun dp(value: Int) = (value * root.resources.displayMetrics.density).roundToInt()
 
-    inner class StreamReply(private val text: TextView) {
-        private val handler = Handler(Looper.getMainLooper())
-        private val pending = StringBuilder()
-        private var scheduled = false
-        private val flush = Runnable { flushText() }
-
-        fun enqueue(chunk: String) {
-            synchronized(pending) {
-                pending.append(chunk)
-                if (!scheduled) {
-                    scheduled = true
-                    handler.postDelayed(flush, 45)
-                }
-            }
-        }
-
-        fun finish(): Boolean {
-            handler.removeCallbacks(flush)
-            flushText()
-            return text.text.isNotBlank()
-        }
-
-        private fun flushText() {
-            val chunk = synchronized(pending) {
-                scheduled = false
-                pending.toString().also { pending.clear() }
-            }
-            if (!activity.isDestroyed && !activity.isFinishing && chunk.isNotEmpty()) {
-                text.append(chunk)
-                scrollToLatest()
-            }
-        }
-    }
 }

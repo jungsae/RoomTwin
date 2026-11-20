@@ -29,6 +29,8 @@ class MainActivity : Activity() {
     private lateinit var roomPanel: View
     private lateinit var playgroundRoot: View
     private lateinit var playground: PlaygroundPanel
+    private lateinit var visionRoot: View
+    private lateinit var visionLab: VisionLabPanel
     private lateinit var backends: RadioGroup
     private lateinit var pickImage: Button
     private lateinit var clearImage: Button
@@ -42,6 +44,9 @@ class MainActivity : Activity() {
     private var selectedImage: Uri? = null
     private var playgroundImage: Attachment? = null
     private var pendingCapture: File? = null
+    private var captureTarget = PLAYGROUND_IMAGE
+    private val labImages = arrayOfNulls<Attachment>(2)
+    private var pendingExport: Attachment? = null
     private var mode = R.id.room_mode
     private var updatingMode = false
     private var busy = false
@@ -55,6 +60,9 @@ class MainActivity : Activity() {
         roomPanel = findViewById(R.id.room_panel)
         playgroundRoot = findViewById(R.id.playground_panel)
         playground = PlaygroundPanel(this, playgroundRoot)
+        visionRoot = findViewById(R.id.vision_lab_panel)
+        visionLab = VisionLabPanel(this, visionRoot, ::selectLabFeature, ::labPhotoAction)
+        savedInstanceState?.getString(LAB_FEATURE)?.let { visionLab.select(LabFeature.valueOf(it)) }
         backends = findViewById(R.id.backends)
         pickImage = findViewById(R.id.pick_image)
         clearImage = findViewById(R.id.clear_image)
@@ -69,6 +77,10 @@ class MainActivity : Activity() {
         pendingCapture = savedInstanceState?.getString(PENDING_CAPTURE)?.let {
             File(captureDirectory, it)
         }
+        captureTarget = savedInstanceState?.getInt(CAPTURE_TARGET, PLAYGROUND_IMAGE) ?: PLAYGROUND_IMAGE
+        pendingExport = savedInstanceState?.getString(EXPORT_URI)?.let { stored ->
+            Attachment(Uri.parse(stored), savedInstanceState.getString(EXPORT_FILE)?.let { File(captureDirectory, it) })
+        }
         showMode(savedInstanceState?.getInt(MODE, R.id.room_mode) ?: R.id.room_mode)
         modes.setOnCheckedChangeListener { _, id ->
             if (!updatingMode && !busy && id != mode) requestMode(id)
@@ -82,7 +94,7 @@ class MainActivity : Activity() {
         analyzeRoom.setOnClickListener { submitRoom() }
 
         playground.galleryButton.setOnClickListener { openImagePicker(PLAYGROUND_IMAGE) }
-        playground.cameraButton.setOnClickListener { openCamera() }
+        playground.cameraButton.setOnClickListener { openCamera(PLAYGROUND_IMAGE) }
         playground.detachButton.setOnClickListener { clearPlaygroundImage() }
         playground.sendButton.setOnClickListener { submitChat() }
         playground.resetButton.setOnClickListener {
@@ -102,21 +114,56 @@ class MainActivity : Activity() {
                 }
             }
         }
+        visionLab.runButton.setOnClickListener { submitLab() }
+        visionLab.resetButton.setOnClickListener {
+            if (hasLabState()) {
+                AlertDialog.Builder(this)
+                    .setMessage(R.string.lab_reset_confirm)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.lab_reset) { _, _ -> resetLab() }
+                    .show()
+            }
+        }
+        visionLab.settingsButton.setOnClickListener {
+            showPlaygroundSettings(this, visionLab.settings) { next ->
+                if (next != visionLab.settings) {
+                    visionLab.settings = next
+                    inference.reset(owner)
+                    visionLab.resetResults()
+                    visionLab.setStatus(getString(R.string.lab_settings_changed))
+                }
+            }
+        }
+        visionLab.cpuRetry.setOnClickListener {
+            val previousInput = visionLab.input.text.toString()
+            visionLab.settings = visionLab.settings.copy(backend = InferenceBackend.CPU)
+            inference.reset(owner)
+            visionLab.resetResults()
+            visionLab.input.setText(previousInput)
+            submitLab()
+        }
     }
 
     private fun requestMode(id: Int) {
-        if (id == R.id.room_mode && (playground.hasTurns || playgroundImage != null)) {
+        val confirmation = when {
+            mode == R.id.playground_mode && (playground.hasTurns || playgroundImage != null) -> R.string.chat_leave_mode
+            mode == R.id.vision_lab_mode && hasLabState() -> R.string.lab_leave_confirm
+            else -> null
+        }
+        fun changeMode() {
+            if (mode == R.id.playground_mode) resetChat()
+            if (mode == R.id.vision_lab_mode) resetLab()
+            showMode(id)
+        }
+        if (confirmation == null) {
+            changeMode()
+        } else {
             showMode(mode)
             AlertDialog.Builder(this)
-                .setMessage(R.string.chat_room_confirmation)
+                .setMessage(confirmation)
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.chat_continue) { _, _ ->
-                    resetChat()
-                    showMode(id)
-                }
+                .setPositiveButton(R.string.chat_continue) { _, _ -> changeMode() }
                 .show()
-        } else {
-            showMode(id)
         }
     }
 
@@ -127,6 +174,7 @@ class MainActivity : Activity() {
         updatingMode = false
         roomPanel.visibility = if (id == R.id.room_mode) View.VISIBLE else View.GONE
         playgroundRoot.visibility = if (id == R.id.playground_mode) View.VISIBLE else View.GONE
+        visionRoot.visibility = if (id == R.id.vision_lab_mode) View.VISIBLE else View.GONE
     }
 
     @Suppress("DEPRECATION")
@@ -145,14 +193,15 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun openCamera() {
+    private fun openCamera(target: Int) {
         val capture = runCatching {
             check(captureDirectory.isDirectory || captureDirectory.mkdirs())
             File.createTempFile("chat-", ".jpg", captureDirectory)
         }.getOrElse {
-            playground.setStatus(getString(R.string.image_failed))
+            imageStatus(target, R.string.image_failed)
             return
         }
+        captureTarget = target
         pendingCapture = capture
         val uri = captureUri(capture)
         val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
@@ -173,26 +222,34 @@ class MainActivity : Activity() {
         pendingCapture = null
         revokeUriPermission(uri, CAMERA_GRANTS)
         inference.execute { file.delete() }
-        playground.setStatus(getString(R.string.chat_no_camera))
+        imageStatus(captureTarget, R.string.chat_no_camera)
     }
 
     @Deprecated("Handles system picker and camera results.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == LAB_EXPORT) {
+            val original = pendingExport ?: return
+            pendingExport = null
+            val destination = data?.data
+            if (resultCode == RESULT_OK && destination != null) savePhotoCopy(original, destination)
+            else releaseExportIfDetached(original)
+            return
+        }
         if (requestCode == PLAYGROUND_CAPTURE) {
             val file = pendingCapture ?: return
             pendingCapture = null
             val uri = captureUri(file)
             revokeUriPermission(uri, CAMERA_GRANTS)
             if (resultCode == RESULT_OK) {
-                loadPlaygroundImage(Attachment(uri, file))
+                loadPreview(Attachment(uri, file), captureTarget)
             } else {
                 inference.execute { file.delete() }
-                imageStatus(requestCode, R.string.image_cancelled)
+                imageStatus(captureTarget, R.string.image_cancelled)
             }
             return
         }
-        if (requestCode !in listOf(ROOM_IMAGE, PLAYGROUND_IMAGE)) return
+        if (requestCode != ROOM_IMAGE && requestCode != PLAYGROUND_IMAGE && requestCode !in LAB_FIRST..LAB_LAST) return
         val image = data?.data
         when {
             resultCode != RESULT_OK -> imageStatus(requestCode, R.string.image_cancelled)
@@ -201,13 +258,16 @@ class MainActivity : Activity() {
                 setSelectedImage(image)
                 status.setText(R.string.ready)
             }
-            else -> loadPlaygroundImage(Attachment(image))
+            else -> loadPreview(Attachment(image), requestCode)
         }
     }
 
     private fun imageStatus(request: Int, message: Int) {
-        if (request == ROOM_IMAGE) status.setText(message)
-        else playground.setStatus(getString(message))
+        when (request) {
+            ROOM_IMAGE -> status.setText(message)
+            PLAYGROUND_IMAGE -> playground.setStatus(getString(message))
+            else -> visionLab.setStatus(getString(message))
+        }
     }
 
     private fun setSelectedImage(uri: Uri?) {
@@ -216,13 +276,18 @@ class MainActivity : Activity() {
         clearImage.visibility = if (uri == null) View.GONE else View.VISIBLE
     }
 
-    private fun loadPlaygroundImage(attachment: Attachment) {
-        if (playground.imageInContext || mode != R.id.playground_mode) {
+    private fun loadPreview(attachment: Attachment, request: Int) {
+        val labSlot = request - LAB_FIRST
+        val activeTarget = when (request) {
+            PLAYGROUND_IMAGE -> mode == R.id.playground_mode && !playground.imageInContext
+            else -> mode == R.id.vision_lab_mode && labSlot in 0 until visionLab.feature.imageCount
+        }
+        if (!activeTarget) {
             releaseAttachment(attachment)
             return
         }
         setBusy(true)
-        playground.setStatus(getString(R.string.chat_image_loading))
+        imageStatus(request, R.string.chat_image_loading)
         val resolver = contentResolver
         inference.execute {
             val preview = runCatching {
@@ -248,14 +313,22 @@ class MainActivity : Activity() {
                 setBusy(false)
                 preview.fold(
                     onSuccess = {
-                        releaseAttachment(playgroundImage)
-                        playgroundImage = attachment
-                        playground.setPreview(it)
-                        playground.setStatus(null)
+                        if (request == PLAYGROUND_IMAGE) {
+                            releaseAttachment(playgroundImage)
+                            playgroundImage = attachment
+                            playground.setPreview(it)
+                            playground.setStatus(null)
+                        } else {
+                            releaseAttachment(labImages[labSlot])
+                            labImages[labSlot] = attachment
+                            visionLab.setPreview(labSlot, it)
+                            inference.reset(owner)
+                            visionLab.resetResults()
+                        }
                     },
                     onFailure = {
                         releaseAttachment(attachment)
-                        playground.setStatus(getString(R.string.image_failed))
+                        imageStatus(request, R.string.image_failed)
                     },
                 )
             }
@@ -311,6 +384,126 @@ class MainActivity : Activity() {
                     playground.clearTranscript()
                     playground.question.setText(text)
                     playground.setStatus(getString(R.string.chat_reset_after_error, requestError(it)))
+                },
+            )
+        }
+    }
+
+    private fun hasLabState() = visionLab.hasRecords || labImages.any { it != null }
+
+    private fun selectLabFeature(feature: LabFeature) {
+        if (busy || feature == visionLab.feature) return
+        fun openFeature() {
+            resetLab()
+            visionLab.select(feature)
+        }
+        if (hasLabState()) {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.lab_reset_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.chat_continue) { _, _ -> openFeature() }
+                .show()
+        } else openFeature()
+    }
+
+    private fun labPhotoAction(slot: Int, action: LabPhotoAction) {
+        if (busy || slot !in 0 until visionLab.feature.imageCount) return
+        when (action) {
+            LabPhotoAction.CAMERA -> openCamera(LAB_FIRST + slot)
+            LabPhotoAction.GALLERY -> openImagePicker(LAB_FIRST + slot)
+            LabPhotoAction.REMOVE -> {
+                clearLabPhoto(slot)
+                inference.reset(owner)
+                visionLab.resetResults()
+            }
+            LabPhotoAction.SAVE -> labImages[slot]?.let { choosePhotoCopyDestination(it) }
+        }
+    }
+
+    private fun clearLabPhoto(slot: Int) {
+        releaseAttachment(labImages[slot])
+        labImages[slot] = null
+        visionLab.setPreview(slot, null)
+    }
+
+    private fun resetLab() {
+        inference.reset(owner)
+        labImages.indices.forEach(::clearLabPhoto)
+        visionLab.resetResults()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun choosePhotoCopyDestination(photo: Attachment) {
+        val mime = runCatching { contentResolver.getType(photo.uri) }.getOrNull()
+            ?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+        val suffix = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "jpg"
+        val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime
+            putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+            putExtra(Intent.EXTRA_TITLE, "${getString(R.string.lab_saved_copy)}.$suffix")
+        }
+        pendingExport = photo
+        try {
+            startActivityForResult(create, LAB_EXPORT)
+        } catch (_: ActivityNotFoundException) {
+            pendingExport = null
+            visionLab.setStatus(getString(R.string.lab_save_failed))
+        }
+    }
+
+    private fun savePhotoCopy(photo: Attachment, destination: Uri) {
+        setBusy(true)
+        val resolver = contentResolver
+        inference.execute {
+            val saved = runCatching {
+                checkNotNull(resolver.openInputStream(photo.uri)).use { input ->
+                    checkNotNull(resolver.openOutputStream(destination)).use { output -> input.copyTo(output) }
+                }
+            }.isSuccess
+            runOnUiThread {
+                releaseExportIfDetached(photo)
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                setBusy(false)
+                visionLab.setStatus(getString(if (saved) R.string.lab_saved else R.string.lab_save_failed))
+            }
+        }
+    }
+
+    private fun releaseExportIfDetached(photo: Attachment) {
+        if (labImages.none { it?.uri == photo.uri }) releaseAttachment(photo)
+    }
+
+    private fun submitLab() {
+        if (busy) return
+        val followUp = visionLab.hasConversation
+        val images = if (followUp) emptyList() else labImages.take(visionLab.feature.imageCount).mapNotNull { it?.uri }
+        if (!followUp && images.size != visionLab.feature.imageCount) {
+            visionLab.setStatus(getString(R.string.lab_pick_needed))
+            return
+        }
+        val request = visionLab.request(images)
+        if ((request.followUp || request.feature == LabFeature.FIND) && request.text.isBlank()) {
+            visionLab.input.error = getString(R.string.missing_prompt)
+            return
+        }
+        val output = visionLab.startResult(request)
+        visionLab.setStatus(getString(R.string.working))
+        setBusy(true)
+        submit({ runner -> runner.runVisionLab(request, output.stream::enqueue) }) { result ->
+            result.fold(
+                onSuccess = {
+                    visionLab.setStatus(null)
+                    visionLab.complete(output, it)
+                    if (it.inference.text.isBlank()) inference.reset(owner)
+                },
+                onFailure = { error ->
+                    inference.reset(owner)
+                    visionLab.failed(output)
+                    val retry = request.settings.backend == InferenceBackend.GPU &&
+                        (error is OutOfMemoryError || (error is GemmaRunner.Failure &&
+                            error.code in listOf(GemmaRunner.Error.INFERENCE_FAILED, GemmaRunner.Error.MODEL_INIT_FAILED)))
+                    visionLab.setStatus(requestError(error), allowCpu = retry)
                 },
             )
         }
@@ -420,6 +613,7 @@ class MainActivity : Activity() {
         }
         listOf(pickImage, clearImage, analyzeRoom).forEach { it.isEnabled = !value }
         playground.setEnabled(!value)
+        visionLab.setEnabled(!value)
     }
 
     @Suppress("DEPRECATION")
@@ -437,7 +631,13 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt(MODE, mode)
+        outState.putString(LAB_FEATURE, visionLab.feature.name)
+        outState.putInt(CAPTURE_TARGET, captureTarget)
         pendingCapture?.let { outState.putString(PENDING_CAPTURE, it.name) }
+        pendingExport?.let {
+            outState.putString(EXPORT_URI, it.uri.toString())
+            it.file?.let { file -> outState.putString(EXPORT_FILE, file.name) }
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -445,7 +645,11 @@ class MainActivity : Activity() {
         active.set(false)
         inference.release(owner)
         releaseAttachment(playgroundImage)
+        labImages.forEach { photo ->
+            if (photo?.uri != pendingExport?.uri || isFinishing) releaseAttachment(photo)
+        }
         if (!isChangingConfigurations && isFinishing) {
+            pendingExport?.let(::releaseExportIfDetached)
             pendingCapture?.let {
                 revokeUriPermission(captureUri(it), CAMERA_GRANTS)
                 inference.execute { it.delete() }
@@ -473,6 +677,13 @@ class MainActivity : Activity() {
         const val ROOM_IMAGE = 1
         const val PLAYGROUND_IMAGE = 2
         const val PLAYGROUND_CAPTURE = 3
+        const val LAB_FIRST = 4
+        const val LAB_LAST = 5
+        const val LAB_EXPORT = 6
+        const val LAB_FEATURE = "visionLabFeature"
+        const val CAPTURE_TARGET = "visionLabCaptureTarget"
+        const val EXPORT_URI = "visionLabExportUri"
+        const val EXPORT_FILE = "visionLabExportFile"
         const val CAMERA_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     }
 }

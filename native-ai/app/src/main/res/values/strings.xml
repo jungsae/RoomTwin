@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gemma 4 E2B 실습</string>
+    <string name="prompt_hint">모델에 보낼 질문</string>
+    <string name="pick_image">이미지 선택</string>
+    <string name="change_image">이미지 변경</string>
+    <string name="clear_image">이미지 제거</string>
+    <string name="run_inference">추론 실행</string>
+    <string name="ready">CPU · 실행 대기 중</string>
+    <string name="working">CPU · 모델 준비 및 추론 중</string>
+    <string name="completed">CPU · 완료</string>
+    <string name="missing_prompt">질문을 입력해 주세요.</string>
+    <string name="storage_unavailable">앱 전용 외부 저장소를 사용할 수 없습니다.</string>
+    <string name="model_missing">모델 파일이 없거나 읽을 수 없습니다. 파일 배치 경로\n%1$s</string>
+    <string name="model_failed">모델을 초기화하지 못했습니다 (%1$s). 파일과 기기 환경을 확인해 주세요.</string>
+    <string name="no_picker">기기에서 이미지 선택기를 열 수 없습니다.</string>
+    <string name="image_failed">이미지를 읽지 못했습니다. 기기에 저장된 다른 이미지를 선택해 주세요.</string>
+    <string name="inference_failed">추론에 실패했습니다 (%1$s). 입력을 확인한 뒤 다시 실행해 주세요.</string>
+    <string name="empty_response">모델이 빈 응답을 반환했습니다. 질문을 바꿔 다시 실행해 주세요.</string>
+    <string name="analyze_room">실내 사진 분석 · JSON</string>
+    <string name="room_image_required">분석할 실내 사진을 선택해 주세요.</string>
+    <string name="room_working">CPU · 실내 사진 분석 중</string>
+    <string name="room_json_success">JSON 파싱 및 스키마 검증 성공</string>
+    <string name="room_json_error">JSON 결과를 사용할 수 없습니다 (%1$s). %2$s</string>
+    <string name="room_invalid_json">잘못된 JSON 형식입니다.</string>
+    <string name="room_missing_field">필수 필드가 없습니다.</string>
+    <string name="room_wrong_type">필드의 자료형이 올바르지 않습니다.</string>
+    <string name="room_unsupported_value">지원하지 않는 값이거나 허용 범위를 넘었습니다.</string>
+    <string name="room_unknown_field">스키마에 없는 필드가 있습니다.</string>
+    <string name="image_cancelled">이미지 선택을 취소했습니다.</string>
+    <string name="memory_failed">메모리가 부족해 작업을 중단했습니다. 다른 앱을 닫고 다시 시도해 주세요.</string>
+    <string name="raw_response">원본 모델 응답</string>
+    <string name="validated_response">검증된 JSON</string>
+    <string name="duration_ms">%1$d ms</string>
+    <string name="engine_reused">이미 로드됨</string>
+    <string name="no_image">이미지 없음</string>
+    <string name="request_timings">모델 초기화 %1$s · 이미지 전처리 %2$s\n추론 %3$d ms · 전체 %4$d ms</string>
+</resources>

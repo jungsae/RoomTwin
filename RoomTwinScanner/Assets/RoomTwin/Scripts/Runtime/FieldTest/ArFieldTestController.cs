@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -77,45 +78,85 @@ namespace RoomTwin.AR
         public float FloorHeightToleranceMeters => floorHeightToleranceMeters;
         public bool HasReferenceFloorY => capture.HasReferenceFloorY;
         public float ReferenceFloorY => capture.ReferenceFloorY;
+        public bool ControllerInitSucceeded { get; private set; }
+        public bool HudReady => hud != null && hud.IsReady;
+        public bool UsingEmergencyHud { get; private set; }
 
         void Awake()
         {
-            if (raycastManager == null)
+            try
             {
-                raycastManager = FindFirstObjectByType<ARRaycastManager>();
+                if (raycastManager == null)
+                {
+                    raycastManager = FindFirstObjectByType<ARRaycastManager>();
+                }
+
+                if (planeManager == null)
+                {
+                    planeManager = FindFirstObjectByType<ARPlaneManager>();
+                }
+
+                if (arSession == null)
+                {
+                    arSession = FindFirstObjectByType<ARSession>();
+                }
+
+                if (arCamera == null)
+                {
+                    arCamera = Camera.main;
+                }
+
+                sessionRoot = raycastManager != null ? raycastManager.transform : transform;
+                capture.HeightToleranceMeters = floorHeightToleranceMeters;
+                outlines = GetComponent<ArScanWallOutlines>();
+                if (outlines == null)
+                {
+                    outlines = gameObject.AddComponent<ArScanWallOutlines>();
+                }
+
+                ControllerInitSucceeded = true;
+                Debug.Log(LogTag + " controller-init=success");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                Debug.LogError(LogTag + " controller-init=failure " + ex.GetType().Name + ": " + ex.Message);
+                return;
             }
 
-            if (planeManager == null)
-            {
-                planeManager = FindFirstObjectByType<ARPlaneManager>();
-            }
+            InitializeHud();
+        }
 
-            if (arSession == null)
+        void InitializeHud()
+        {
+            try
             {
-                arSession = FindFirstObjectByType<ARSession>();
-            }
+                hud = GetComponent<ArScanHud>();
+                if (hud == null)
+                {
+                    hud = gameObject.AddComponent<ArScanHud>();
+                }
 
-            if (arCamera == null)
+                if (!hud.TryInitialize(out _))
+                {
+                    UsingEmergencyHud = true;
+                    return;
+                }
+
+                hud.BindReset(ResetCapture);
+                RefreshPresentation();
+            }
+            catch (Exception ex)
             {
-                arCamera = Camera.main;
-            }
+                Debug.LogException(ex);
+                Debug.LogError(LogTag + " hud-init=failure " + ex.GetType().Name + ": " + ex.Message);
+                if (hud != null)
+                {
+                    hud.CleanupFailedBuild();
+                }
 
-            sessionRoot = raycastManager != null ? raycastManager.transform : transform;
-            capture.HeightToleranceMeters = floorHeightToleranceMeters;
-            hud = GetComponent<ArScanHud>();
-            if (hud == null)
-            {
-                hud = gameObject.AddComponent<ArScanHud>();
+                UsingEmergencyHud = true;
             }
-
-            outlines = GetComponent<ArScanWallOutlines>();
-            if (outlines == null)
-            {
-                outlines = gameObject.AddComponent<ArScanWallOutlines>();
-            }
-
-            hud.BindReset(ResetCapture);
-            RefreshPresentation();
         }
 
         void OnEnable()
@@ -674,13 +715,22 @@ namespace RoomTwin.AR
             }
         }
 
-        void RefreshPresentation()
+        void OnGUI()
         {
-            if (hud == null)
+            if (!UsingEmergencyHud)
             {
                 return;
             }
 
+            GUI.Label(new Rect(24f, 24f, Screen.width - 48f, 120f), "HUD failed. " + status);
+            if (GUI.Button(new Rect(24f, 160f, 220f, 72f), "Reset"))
+            {
+                ResetCapture();
+            }
+        }
+
+        void RefreshPresentation()
+        {
             CollectFloorSamples();
             bool floorChosen = WallCornerSolver.TryChooseFloorY(
                 floorSamples, floorHeightToleranceMeters, out float candidateFloorY, out _);
@@ -696,7 +746,10 @@ namespace RoomTwin.AR
                 RoomBuilt = meshBuilt
             };
             string failure = string.IsNullOrEmpty(lastRejection) ? null : ScanFeedback.ToKorean(lastRejection);
-            hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
+            if (hud != null && hud.IsReady)
+            {
+                hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
+            }
             outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil);
         }
 

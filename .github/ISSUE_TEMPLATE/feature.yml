@@ -1,0 +1,54 @@
+name: Feature
+description: A development task with an owner, completion check, and test plan.
+title: "feat: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search open issues before opening this. Draft pull requests must link it with `Refs #`, not `Fixes` or `Closes`.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What the change should achieve.
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Owning module or agent
+      options:
+        - Cursor — RoomTwinScanner / docs / .github
+        - Codex — native-ai
+        - Shared contract — docs only, no cross-module edits
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Behavior, constraints, and files that must stay unchanged.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Completion criteria
+      description: Observable results that mean the task is done.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test plan
+      description: Automatic tests, Editor or device checks, and items that will remain unverified.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Related documents
+      description: Paths such as docs/ROADMAP.md or docs/DECISIONS.md.
+    validations:
+      required: false

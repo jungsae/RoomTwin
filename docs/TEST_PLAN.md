@@ -18,9 +18,9 @@
 
 | Capability | Editor | Device | Notes |
 |------------|--------|--------|-------|
-| AR package boot / session | smoke only | required | packages not installed yet |
+| AR package boot / session | smoke only | developer-verified on Galaxy S20+ | not a GitHub Actions result |
 | Measurement capture | mock inputs | required | treat planes/depth as uncertain |
-| 3D room generation | required | required | visual + dimension sanity |
+| 3D room generation | developer-verified for one convex quad | not run in AR | `GeometrySandbox` only |
 | Manual correction | required | required | edit then remesh |
 | Save / load | required | required | round-trip room-local data |
 | Furniture placement | required | required | pose persists with room |
@@ -41,6 +41,14 @@
 4. Run Edit Mode tests in Window > General > Test Runner. The `RoomTwin.Geometry.Tests` assembly covers winding, inward wall normals, clockwise input, and invalid corners.
 5. This scene has no AR Session. Phone and ARCore are not required.
 
+Developer result on 2026-11-20, Unity `6000.6.9f1`, commit `69c80fa`: the floor and four walls were visible; corner and height edits rebuilt; a bad corner order warned; the sample was restored to 4 m × 3 m × 2.4 m. Edit Mode `RoomTwin.Geometry.Tests` reported 7 passed, 0 failed, 0.016 s. The Console showed 0 errors. This was a local Test Runner run, not CI.
+
+## CI strategy
+
+- `native-ai` pull requests that change `native-ai/**` use `.github/workflows/native-ai-ci.yml`: JDK 17, Gradle 9.3.1, Android SDK 36, `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:lintDebug`. No model weight is downloaded. A green run does not cover Galaxy S20+ inference.
+- As of 2026-11-20 that workflow has not been executed. `origin/main` does not contain the Gradle project. `origin/feat/native-ai` does, and it has no Gradle wrapper and no `app/src/test` tree yet. The local Codex worktree is ahead of that remote and was not modified here.
+- Unity CI is intentionally absent. The Editor license blocks batch mode, and agents must not start Unity. Geometry and AR Editor tests stay in Test Runner on a developer machine.
+
 ## Phase 0 Touch Marker Alignment (device)
 
 1. RAYCAST mode: tap a textured floor or desk, hold the phone still, and read the HUD. The cyan touch cross and the magenta hit reprojection should overlap, with an error of 20 px or less.
@@ -54,7 +62,8 @@
 - Vertical plane quality on blank walls
 - Long-session tracking drift
 - Performance on mid-range Android devices
-- Any `native-ai` inference path
+- Any `native-ai` on-device inference path (CI does not replace it)
+- GitHub Actions execution of `.github/workflows/native-ai-ci.yml`
 
 ## Reporting Template
 

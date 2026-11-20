@@ -7,6 +7,7 @@ RoomTwin/
   AGENTS.md                 # shared agent rules
   .cursor/rules/            # Cursor-only rules
   docs/                     # product / design docs
+  .github/                  # issue templates, PR template, CI (Cursor)
   RoomTwinScanner/          # Unity 6.6 Android AR app (Cursor)
   native-ai/                # Kotlin on-device AI module (Codex)
 ```
@@ -44,6 +45,7 @@ RoomTwin/
 - Android min SDK 29, product version `0.1.0`
 - AR Foundation / ARCore are in `Packages/manifest.json`; Phase 0 probe scene is `ARPlaneProbe`
 - Editor room mesh lives in `GeometrySandbox` and does not reference the AR session
+- Git procedure lives in `docs/DEVELOPMENT_WORKFLOW.md`. Agents do not merge `main` themselves.
 
 ## Native AI Boundary
 

@@ -14,9 +14,6 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
-    "internalsVisibleTo": [
-        "RoomTwin.FieldTest.PlayModeTests"
-    ],
     "defineConstraints": [],
     "versionDefines": [],
     "noEngineReferences": false

@@ -55,7 +55,7 @@ namespace RoomTwin.AR
         Transform sessionRoot;
         Transform markerRoot;
         Transform roomAnchor;
-        string status = "Select floor corner 1.";
+        string status = "Select a wall. The corner is the wall intersection, not the touch point.";
         string lastRejection = string.Empty;
         bool meshBuilt;
         ARSessionState lastSessionState;
@@ -148,7 +148,7 @@ namespace RoomTwin.AR
             capture.Reset();
             meshBuilt = false;
             lastRejection = string.Empty;
-            status = "Select floor corner 1.";
+            status = "Select a wall. The corner is the wall intersection, not the touch point.";
             DestroyChild(markerRoot);
             DestroyChild(roomAnchor);
             markerRoot = null;
@@ -174,57 +174,81 @@ namespace RoomTwin.AR
             Hits.Clear();
             if (!raycastManager.Raycast(screen, Hits, TrackableType.PlaneWithinPolygon))
             {
-                Reject("No plane hit. Point the camera at the floor. The touch may also be outside a detected plane boundary.");
-                Debug.LogWarning($"{LogTag} rejected hits=0 alignment=none");
+                Reject("No plane hit. Scan the wall and the floor. A touch outside a detected plane cannot estimate a corner.");
+                Debug.LogWarning($"{LogTag} rejected hits=0");
                 return;
             }
 
-            if (!TryGetHorizontalFloorHit(out ARRaycastHit hit, out ARPlane plane))
+            if (!TryGetSelectedWall(out ARRaycastHit hit, out ARPlane selectedPlane))
             {
-                Reject("The hit is not a HorizontalUp surface. Point the camera at the floor, not a wall.");
+                Reject("Select a vertical wall. A floor or ceiling touch is not used as a corner.");
                 Debug.LogWarning($"{LogTag} rejected hits={Hits.Count} candidates={DescribeHits()}");
                 return;
             }
 
-            Vector3 world = hit.pose.position;
-            bool hadReference = capture.HasReferenceFloorY;
-            float referenceY = hadReference ? capture.ReferenceFloorY : world.y;
-            float deltaY = world.y - referenceY;
-            if (!capture.TryAdd(world, out string rejection))
+            if (!TryResolveFloorY(out float floorY, out string floorError))
+            {
+                Reject(floorError);
+                Debug.LogWarning($"{LogTag} rejected floor \"{floorError}\" horizontalYs={DescribeHorizontalYs()}");
+                return;
+            }
+
+            if (planeManager == null)
+            {
+                Reject("ARPlaneManager is missing.");
+                return;
+            }
+
+            DetectedWall selected = ToWall(selectedPlane);
+            var others = new List<DetectedWall>();
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.trackableId == selectedPlane.trackableId || plane.alignment != PlaneAlignment.Vertical)
+                {
+                    continue;
+                }
+
+                others.Add(ToWall(plane));
+            }
+
+            if (!WallCornerSolver.TryEstimate(selected, others, floorY, out WallCornerEstimate estimate))
+            {
+                Reject(estimate.Rejection);
+                Debug.LogWarning(
+                    $"{LogTag} corner-estimate selected={selected.Id} touch={Format(hit.pose.position)} " +
+                    $"floorY={floorY.ToString("0.000", CultureInfo.InvariantCulture)} accepted=false reason=\"{estimate.Rejection}\"");
+                return;
+            }
+
+            Vector3 corner = estimate.Corner;
+            if (!capture.TryAdd(corner, out string rejection))
             {
                 Reject(rejection);
-                Debug.LogWarning(
-                    $"{LogTag} rejected hits={Hits.Count} alignment={plane.alignment} trackable={hit.trackableId} " +
-                    $"planeY={plane.center.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                    $"hitY={world.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                    $"referenceFloorY={(hadReference ? referenceY.ToString("0.000", CultureInfo.InvariantCulture) : "none")} " +
-                    $"deltaY={deltaY.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                    $"reason=\"{rejection}\" candidates={DescribeHits()}");
+                Debug.LogWarning($"{LogTag} rejected estimatedCorner={Format(corner)} reason=\"{rejection}\"");
                 return;
             }
 
             EnsureMarkerRoot();
-            CreateMarker(capture.Count, world);
-            LogCorner(capture.Count, world, screen, hit, plane);
+            CreateMarker(capture.Count, corner);
+            LogEstimate(capture.Count, hit.pose.position, estimate);
 
             if (!capture.IsComplete)
             {
-                status = $"Select floor corner {capture.Count + 1}.";
+                status = $"Estimated corner {capture.Count}/4. Select the next wall.";
                 return;
             }
 
             BuildRoom();
         }
 
-        bool TryGetHorizontalFloorHit(out ARRaycastHit chosen, out ARPlane plane)
+        bool TryGetSelectedWall(out ARRaycastHit chosen, out ARPlane plane)
         {
             for (int i = 0; i < Hits.Count; i++)
             {
-                ARRaycastHit candidate = Hits[i];
-                if (candidate.trackable is ARPlane floor && floor.alignment == PlaneAlignment.HorizontalUp)
+                if (Hits[i].trackable is ARPlane wall && wall.alignment == PlaneAlignment.Vertical)
                 {
-                    chosen = candidate;
-                    plane = floor;
+                    chosen = Hits[i];
+                    plane = wall;
                     return true;
                 }
             }
@@ -232,6 +256,97 @@ namespace RoomTwin.AR
             chosen = default;
             plane = null;
             return false;
+        }
+
+        bool TryResolveFloorY(out float floorY, out string error)
+        {
+            if (capture.HasReferenceFloorY)
+            {
+                floorY = capture.ReferenceFloorY;
+                error = null;
+                return true;
+            }
+
+            var heights = new List<float>();
+            if (planeManager != null)
+            {
+                foreach (ARPlane plane in planeManager.trackables)
+                {
+                    if (plane.alignment == PlaneAlignment.HorizontalUp)
+                    {
+                        heights.Add(plane.center.y);
+                    }
+                }
+            }
+
+            return WallCornerSolver.TryChooseFloorY(heights, floorHeightToleranceMeters, out floorY, out error);
+        }
+
+        static DetectedWall ToWall(ARPlane plane)
+        {
+            Vector2[] boundary = null;
+            if (plane.boundary.IsCreated && plane.boundary.Length >= 3)
+            {
+                boundary = new Vector2[plane.boundary.Length];
+                for (int i = 0; i < plane.boundary.Length; i++)
+                {
+                    boundary[i] = plane.boundary[i];
+                }
+            }
+
+            return new DetectedWall
+            {
+                Id = plane.trackableId.ToString(),
+                Point = plane.transform.position,
+                Normal = plane.normal,
+                Center = plane.center,
+                AxisU = plane.transform.right,
+                AxisV = plane.transform.forward,
+                HalfExtents = plane.extents,
+                Boundary = boundary
+            };
+        }
+
+        void LogEstimate(int index, Vector3 touch, WallCornerEstimate estimate)
+        {
+            Debug.Log(
+                $"{LogTag} corner={index}/4 estimated=true not-a-survey " +
+                $"selected={estimate.SelectedWallId} other={estimate.OtherWallId} " +
+                $"touch={Format(touch)} corner={Format(estimate.Corner)} " +
+                $"line={Format(estimate.IntersectionDirection)} " +
+                $"floorY={estimate.FloorY.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"residualM={estimate.PlaneResidualMeters.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"boundaryOverflowM={estimate.BoundaryOverflowMeters.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"normalCross={estimate.NormalCrossMagnitude.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"touchToCornerM={Vector3.Distance(touch, estimate.Corner).ToString("0.000", CultureInfo.InvariantCulture)}");
+        }
+
+        string DescribeHorizontalYs()
+        {
+            logBuilder.Clear();
+            if (planeManager == null)
+            {
+                return "none";
+            }
+
+            bool any = false;
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment != PlaneAlignment.HorizontalUp)
+                {
+                    continue;
+                }
+
+                if (any)
+                {
+                    logBuilder.Append(',');
+                }
+
+                any = true;
+                logBuilder.Append(plane.center.y.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+
+            return any ? logBuilder.ToString() : "none";
         }
 
         void BuildRoom()
@@ -270,24 +385,6 @@ namespace RoomTwin.AR
                 "parent=XROrigin rotation=identity");
         }
 
-        void LogCorner(int index, Vector3 world, Vector2 screen, ARRaycastHit hit, ARPlane plane)
-        {
-            Vector3 reprojection = arCamera.WorldToScreenPoint(world);
-            float errorPx = Vector2.Distance(screen, reprojection);
-            Vector3 cameraPosition = arCamera.transform.position;
-            Debug.Log(
-                $"{LogTag} corner={index}/4 world={Format(world)} " +
-                $"screen={screen.x.ToString("0", CultureInfo.InvariantCulture)},{screen.y.ToString("0", CultureInfo.InvariantCulture)} " +
-                $"reprojErrPx={errorPx.ToString("0.0", CultureInfo.InvariantCulture)} " +
-                $"alignment={plane.alignment} trackable={hit.trackableId} " +
-                $"planeY={plane.center.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"hitY={world.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"referenceFloorY={capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"deltaY={(world.y - capture.ReferenceFloorY).ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"hits={Hits.Count} distance={hit.distance.ToString("0.000", CultureInfo.InvariantCulture)} " +
-                $"camera={Format(cameraPosition)}");
-        }
-
         void LogEdges(float[] edges, float floorHeight, bool polygonValid, string error)
         {
             logBuilder.Clear();
@@ -320,7 +417,7 @@ namespace RoomTwin.AR
                 logBuilder.Append(" reason=\"").Append(error).Append('"');
             }
 
-            logBuilder.Append(" tape=compare each edge with a tape along the floor, in tap order");
+            logBuilder.Append(" estimated-edges=not a survey measurement");
             Debug.Log(logBuilder.ToString());
 
             IReadOnlyList<Vector3> corners = capture.WorldCorners;
@@ -568,7 +665,7 @@ namespace RoomTwin.AR
             GUI.Label(new Rect(20f, 16f, 600f, 24f), "Tracking: " + tracking);
             GUI.Label(new Rect(20f, 40f, 600f, 24f), "HorizontalUp planes: " + CountHorizontalFloors());
             GUI.Label(new Rect(20f, 64f, 600f, 24f), $"Corners: {capture.Count}/4  floor Y: {reference}");
-            GUI.Label(new Rect(20f, 88f, 600f, 48f), "Aim at the room floor. The first point sets the height and can be a table.");
+            GUI.Label(new Rect(20f, 88f, 600f, 48f), "Select a wall. The corner is the wall intersection, not the touch point.");
             GUI.Label(new Rect(20f, 136f, 600f, 72f), "Room: " + (meshBuilt ? "built" : status));
             if (GUI.Button(ResetButtonRect(), "Reset"))
             {

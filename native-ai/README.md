@@ -50,7 +50,7 @@ adb shell am start -n com.roomtwin.nativeai/.MainActivity
 
 ```sh
 cd native-ai
-gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+gradle :app:testDebugUnitTest :bridge:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
 이 명령은 JSON 호스트 단위 테스트, APK 빌드, Android Lint를 실행한다. 실기기 추론은 아래 절차로 확인한다.
@@ -94,3 +94,5 @@ Galaxy S20+에서 침실·거실·주방 사진과 침실 반복 입력이 모�
 S20+에서 CPU·GPU를 비교한 결과, 오프라인 검증 범위와 별도 패키지로 재현하는 방법은 [하드웨어 가속 벤치마크](docs/ACCELERATION_BENCHMARK.md)를 참조한다. NPU, 오디오 입력, Unity 연결은 후속 범위다.
 
 실내 사진에서 가구와 벽이 겹칠 때의 인식 품질, 기존·후보 프롬프트 비교 및 재현은 [실내 가구·벽 가림 인식 평가](docs/ROOM_OCCLUSION_EVALUATION.md)를 참조한다.
+
+공유 Android Library는 `:bridge`에 있다. 별도 AAR 빌드, Unity 호출 계약, 호스트에서의 패키징 검증 절차는 [Unity–Native AI 통합 계약](docs/UNITY_INTEGRATION_CONTRACT.md)을 참조한다.

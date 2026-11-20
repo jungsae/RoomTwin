@@ -190,8 +190,13 @@ class MainActivity : Activity() {
     private fun showError(error: Throwable) {
         status.text = when (error) {
             is OutOfMemoryError -> getString(R.string.memory_failed)
-            is GemmaRunner.Failure -> error.detail?.let { getString(error.messageId, it) }
-                ?: getString(error.messageId)
+            is GemmaRunner.Failure -> when (error.code) {
+                GemmaRunner.Error.STORAGE_UNAVAILABLE -> getString(R.string.storage_unavailable)
+                GemmaRunner.Error.MODEL_MISSING -> getString(R.string.model_missing, error.detail)
+                GemmaRunner.Error.MODEL_INIT_FAILED -> getString(R.string.model_failed, error.detail)
+                GemmaRunner.Error.IMAGE_UNREADABLE -> getString(R.string.image_failed)
+                GemmaRunner.Error.INFERENCE_FAILED -> getString(R.string.inference_failed, error.detail)
+            }
             is Exception, is LinkageError -> getString(R.string.inference_failed, error.javaClass.simpleName)
             else -> throw error
         }

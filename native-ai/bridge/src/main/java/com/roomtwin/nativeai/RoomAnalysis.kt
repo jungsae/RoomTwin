@@ -11,7 +11,7 @@ import com.google.gson.stream.JsonToken
 import java.io.IOException
 import java.io.StringReader
 
-internal data class RoomAnalysis(
+data class RoomAnalysis(
     val schemaVersion: String,
     val sceneType: String,
     val objects: List<VisualObservation>,
@@ -19,9 +19,9 @@ internal data class RoomAnalysis(
     val uncertainObservations: List<String>,
 )
 
-internal data class VisualObservation(val type: String, val attributes: List<String>)
+data class VisualObservation(val type: String, val attributes: List<String>)
 
-internal sealed interface RoomAnalysisParseResult {
+sealed interface RoomAnalysisParseResult {
     data class Success(val analysis: RoomAnalysis) : RoomAnalysisParseResult
     data class Failure(val kind: Kind, val path: String = "$") : RoomAnalysisParseResult {
         enum class Kind {
@@ -30,7 +30,7 @@ internal sealed interface RoomAnalysisParseResult {
     }
 }
 
-internal object RoomAnalysisJson {
+object RoomAnalysisJson {
     private const val VERSION = "1.0"
     private const val MAX_RESPONSE_LENGTH = 16_000
     private const val MAX_OBJECTS = 14

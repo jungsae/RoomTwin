@@ -735,7 +735,9 @@ MonoBehaviour:
   arCamera: {fileID: 480921198}
   floorMaterial: {fileID: 2100000, guid: c0ffee00112233445566778899aabb0f, type: 2}
   wallMaterial: {fileID: 2100000, guid: c0ffee00112233445566778899aabb10, type: 2}
+  markerPrefab: {fileID: 812345678901234567, guid: a1f1e1d000112233445566778899bb01, type: 3}
   wallHeightMeters: 2.4
+  floorHeightToleranceMeters: 0.12
 --- !u!4 &1650974023
 Transform:
   m_ObjectHideFlags: 0

@@ -42,7 +42,13 @@ namespace RoomTwin.AR
         Material wallMaterial;
 
         [SerializeField]
+        GameObject markerPrefab;
+
+        [SerializeField]
         float wallHeightMeters = RoomGeometryData.DefaultWallHeightMeters;
+
+        [SerializeField]
+        float floorHeightToleranceMeters = FloorCornerCapture.DefaultHeightToleranceMeters;
 
         readonly FloorCornerCapture capture = new FloorCornerCapture();
         readonly StringBuilder logBuilder = new StringBuilder(512);
@@ -59,6 +65,9 @@ namespace RoomTwin.AR
         public string Status => status;
         public string LastRejection => lastRejection;
         public float WallHeightMeters => wallHeightMeters;
+        public float FloorHeightToleranceMeters => floorHeightToleranceMeters;
+        public bool HasReferenceFloorY => capture.HasReferenceFloorY;
+        public float ReferenceFloorY => capture.ReferenceFloorY;
 
         void Awake()
         {
@@ -83,6 +92,7 @@ namespace RoomTwin.AR
             }
 
             sessionRoot = raycastManager != null ? raycastManager.transform : transform;
+            capture.HeightToleranceMeters = floorHeightToleranceMeters;
         }
 
         void OnEnable()
@@ -143,7 +153,7 @@ namespace RoomTwin.AR
             DestroyChild(roomAnchor);
             markerRoot = null;
             roomAnchor = null;
-            Debug.Log($"{LogTag} reset");
+            Debug.Log($"{LogTag} reset referenceFloorY=cleared");
         }
 
         void TrySelectCorner(Vector2 screen)
@@ -160,23 +170,36 @@ namespace RoomTwin.AR
                 return;
             }
 
+            capture.HeightToleranceMeters = floorHeightToleranceMeters;
             Hits.Clear();
             if (!raycastManager.Raycast(screen, Hits, TrackableType.PlaneWithinPolygon))
             {
-                Reject("No floor hit. The touch may be outside a detected plane boundary, or the floor is not tracked yet.");
+                Reject("No plane hit. Point the camera at the floor. The touch may also be outside a detected plane boundary.");
+                Debug.LogWarning($"{LogTag} rejected hits=0 alignment=none");
                 return;
             }
 
             if (!TryGetHorizontalFloorHit(out ARRaycastHit hit, out ARPlane plane))
             {
-                Reject("Raycast hit a surface that is not a HorizontalUp floor.");
+                Reject("The hit is not a HorizontalUp surface. Point the camera at the floor, not a wall.");
+                Debug.LogWarning($"{LogTag} rejected hits={Hits.Count} candidates={DescribeHits()}");
                 return;
             }
 
             Vector3 world = hit.pose.position;
+            bool hadReference = capture.HasReferenceFloorY;
+            float referenceY = hadReference ? capture.ReferenceFloorY : world.y;
+            float deltaY = world.y - referenceY;
             if (!capture.TryAdd(world, out string rejection))
             {
                 Reject(rejection);
+                Debug.LogWarning(
+                    $"{LogTag} rejected hits={Hits.Count} alignment={plane.alignment} trackable={hit.trackableId} " +
+                    $"planeY={plane.center.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                    $"hitY={world.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                    $"referenceFloorY={(hadReference ? referenceY.ToString("0.000", CultureInfo.InvariantCulture) : "none")} " +
+                    $"deltaY={deltaY.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                    $"reason=\"{rejection}\" candidates={DescribeHits()}");
                 return;
             }
 
@@ -256,7 +279,12 @@ namespace RoomTwin.AR
                 $"{LogTag} corner={index}/4 world={Format(world)} " +
                 $"screen={screen.x.ToString("0", CultureInfo.InvariantCulture)},{screen.y.ToString("0", CultureInfo.InvariantCulture)} " +
                 $"reprojErrPx={errorPx.ToString("0.0", CultureInfo.InvariantCulture)} " +
-                $"alignment={plane.alignment} trackable={hit.trackableId} distance={hit.distance.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"alignment={plane.alignment} trackable={hit.trackableId} " +
+                $"planeY={plane.center.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"hitY={world.y.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"referenceFloorY={capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"deltaY={(world.y - capture.ReferenceFloorY).ToString("0.000", CultureInfo.InvariantCulture)} " +
+                $"hits={Hits.Count} distance={hit.distance.ToString("0.000", CultureInfo.InvariantCulture)} " +
                 $"camera={Format(cameraPosition)}");
         }
 
@@ -343,22 +371,111 @@ namespace RoomTwin.AR
 
         void CreateMarker(int number, Vector3 world)
         {
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            GameObject marker = markerPrefab != null
+                ? Instantiate(markerPrefab, world, Quaternion.identity, markerRoot)
+                : CreateMarkerObject(world);
             marker.name = $"Corner_{number}";
-            marker.transform.SetParent(markerRoot, true);
-            marker.transform.position = world;
             marker.transform.localScale = Vector3.one * MarkerSizeMeters;
-            Collider collider = marker.GetComponent<Collider>();
-            if (collider != null)
-            {
-                Destroy(collider);
-            }
 
             Renderer renderer = marker.GetComponent<Renderer>();
-            if (renderer != null)
+            if (renderer == null)
             {
-                renderer.sharedMaterial = CreateUnlit($"Corner_{number}", NumberColor(number));
+                return;
             }
+
+            if (renderer.sharedMaterial == null)
+            {
+                renderer.sharedMaterial = CreateUnlit("FieldTestCorner", Color.white);
+            }
+
+            var block = new MaterialPropertyBlock();
+            Color color = NumberColor(number);
+            block.SetColor("_BaseColor", color);
+            block.SetColor("_Color", color);
+            renderer.SetPropertyBlock(block);
+        }
+
+        GameObject CreateMarkerObject(Vector3 world)
+        {
+            var marker = new GameObject("Corner");
+            marker.transform.SetParent(markerRoot, false);
+            marker.transform.position = world;
+            marker.AddComponent<MeshFilter>().sharedMesh = SharedSphereMesh();
+            marker.AddComponent<MeshRenderer>();
+            return marker;
+        }
+
+        static Mesh sharedSphereMesh;
+
+        static Mesh SharedSphereMesh()
+        {
+            if (sharedSphereMesh != null)
+            {
+                return sharedSphereMesh;
+            }
+
+            sharedSphereMesh = new Mesh { name = "FieldTestCornerSphere" };
+            const int segments = 8;
+            const int rings = 6;
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+            for (int ring = 0; ring <= rings; ring++)
+            {
+                float v = ring / (float)rings;
+                float phi = Mathf.PI * v;
+                for (int segment = 0; segment <= segments; segment++)
+                {
+                    float u = segment / (float)segments;
+                    float theta = 2f * Mathf.PI * u;
+                    vertices.Add(new Vector3(
+                        Mathf.Sin(phi) * Mathf.Cos(theta),
+                        Mathf.Cos(phi),
+                        Mathf.Sin(phi) * Mathf.Sin(theta)) * 0.5f);
+                }
+            }
+
+            int stride = segments + 1;
+            for (int ring = 0; ring < rings; ring++)
+            {
+                for (int segment = 0; segment < segments; segment++)
+                {
+                    int a = ring * stride + segment;
+                    int b = a + stride;
+                    triangles.Add(a);
+                    triangles.Add(a + 1);
+                    triangles.Add(b);
+                    triangles.Add(a + 1);
+                    triangles.Add(b + 1);
+                    triangles.Add(b);
+                }
+            }
+
+            sharedSphereMesh.SetVertices(vertices);
+            sharedSphereMesh.SetTriangles(triangles, 0);
+            sharedSphereMesh.RecalculateNormals();
+            return sharedSphereMesh;
+        }
+
+        string DescribeHits()
+        {
+            logBuilder.Clear();
+            for (int i = 0; i < Hits.Count; i++)
+            {
+                if (i > 0)
+                {
+                    logBuilder.Append(';');
+                }
+
+                ARRaycastHit hit = Hits[i];
+                string alignment = hit.trackable is ARPlane plane ? plane.alignment.ToString() : hit.hitType.ToString();
+                logBuilder.Append(alignment);
+                logBuilder.Append(" id=");
+                logBuilder.Append(hit.trackableId);
+                logBuilder.Append(" y=");
+                logBuilder.Append(hit.pose.position.y.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+
+            return logBuilder.ToString();
         }
 
         void CreateMeshObject(Transform parent, string objectName, Mesh mesh, Material material, Color fallback)
@@ -434,7 +551,7 @@ namespace RoomTwin.AR
 
         static Rect ResetButtonRect()
         {
-            return new Rect(16f, 168f, 280f, 52f);
+            return new Rect(16f, 220f, 280f, 52f);
         }
 
         void OnGUI()
@@ -443,12 +560,16 @@ namespace RoomTwin.AR
             Matrix4x4 previous = GUI.matrix;
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
 
-            GUI.Box(new Rect(8f, 8f, 520f, 220f), GUIContent.none);
+            GUI.Box(new Rect(8f, 8f, 640f, 300f), GUIContent.none);
             string tracking = arSession != null ? ARSession.state.ToString() : "No ARSession";
-            GUI.Label(new Rect(20f, 16f, 490f, 28f), "Tracking: " + tracking);
-            GUI.Label(new Rect(20f, 44f, 490f, 28f), "Horizontal floors: " + CountHorizontalFloors());
-            GUI.Label(new Rect(20f, 72f, 490f, 28f), $"Corners: {capture.Count}/4");
-            GUI.Label(new Rect(20f, 100f, 490f, 56f), "Room: " + (meshBuilt ? "built" : status));
+            string reference = capture.HasReferenceFloorY
+                ? capture.ReferenceFloorY.ToString("0.000", CultureInfo.InvariantCulture) + " m"
+                : "not set";
+            GUI.Label(new Rect(20f, 16f, 600f, 24f), "Tracking: " + tracking);
+            GUI.Label(new Rect(20f, 40f, 600f, 24f), "HorizontalUp planes: " + CountHorizontalFloors());
+            GUI.Label(new Rect(20f, 64f, 600f, 24f), $"Corners: {capture.Count}/4  floor Y: {reference}");
+            GUI.Label(new Rect(20f, 88f, 600f, 48f), "Aim at the room floor. The first point sets the height and can be a table.");
+            GUI.Label(new Rect(20f, 136f, 600f, 72f), "Room: " + (meshBuilt ? "built" : status));
             if (GUI.Button(ResetButtonRect(), "Reset"))
             {
                 ResetCapture();

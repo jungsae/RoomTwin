@@ -1,11 +1,12 @@
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 namespace RoomTwin.Geometry
 {
     /// <summary>
     /// Maps AR world positions into one horizontal room frame.
-    /// The first corner is the XZ origin. Y is flattened to one floor height.
+    /// The first corner is the XZ origin and the floor height.
     /// These coordinates are room-local meters, not a live camera pose.
     /// </summary>
     public static class RoomLocalFrame
@@ -31,7 +32,6 @@ namespace RoomTwin.Geometry
                 return false;
             }
 
-            float heightSum = 0f;
             for (int i = 0; i < worldCorners.Count; i++)
             {
                 Vector3 corner = worldCorners[i];
@@ -40,11 +40,9 @@ namespace RoomTwin.Geometry
                     error = $"Corner {i + 1} has a non-finite world position.";
                     return false;
                 }
-
-                heightSum += corner.y;
             }
 
-            floorHeightMeters = heightSum / worldCorners.Count;
+            floorHeightMeters = worldCorners[0].y;
             Vector3 first = worldCorners[0];
             anchorWorld = new Vector3(first.x, floorHeightMeters, first.z);
 
@@ -84,10 +82,15 @@ namespace RoomTwin.Geometry
     /// </summary>
     public sealed class FloorCornerCapture
     {
+        public const float DefaultHeightToleranceMeters = 0.12f;
+
         readonly List<Vector3> corners = new List<Vector3>(RoomGeometryValidator.RequiredCornerCount);
 
         public int Count => corners.Count;
         public bool IsComplete => corners.Count == RoomGeometryValidator.RequiredCornerCount;
+        public bool HasReferenceFloorY => corners.Count > 0;
+        public float ReferenceFloorY => corners.Count > 0 ? corners[0].y : float.NaN;
+        public float HeightToleranceMeters { get; set; } = DefaultHeightToleranceMeters;
         public IReadOnlyList<Vector3> WorldCorners => corners;
 
         public bool TryAdd(Vector3 worldCorner, out string rejection)
@@ -103,6 +106,22 @@ namespace RoomTwin.Geometry
             {
                 rejection = "Four corners are already selected. Reset before measuring again.";
                 return false;
+            }
+
+            if (corners.Count > 0)
+            {
+                float referenceY = corners[0].y;
+                float deltaY = worldCorner.y - referenceY;
+                if (Mathf.Abs(deltaY) > HeightToleranceMeters)
+                {
+                    rejection = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Height differs by {0:0.000} m from the first floor Y {1:0.000}. Tolerance is {2:0.00} m.",
+                        deltaY,
+                        referenceY,
+                        HeightToleranceMeters);
+                    return false;
+                }
             }
 
             var candidate = new Vector2(worldCorner.x, worldCorner.z);

@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/RoomTwin/Scenes/ARFieldTest.unity
+    guid: a1f1e1d000112233445566778899aa02
+  - enabled: 1
     path: Assets/RoomTwin/Scenes/ARPlaneProbe.unity
     guid: da8607cd722ff714caa73f1c3ab07985
   m_configObjects:

@@ -1,0 +1,21 @@
+{
+    "name": "RoomTwin.Geometry.Tests",
+    "rootNamespace": "RoomTwin.Geometry.Tests",
+    "references": [
+        "RoomTwin.Geometry"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false,
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

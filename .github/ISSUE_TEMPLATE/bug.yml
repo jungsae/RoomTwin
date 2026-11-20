@@ -1,0 +1,60 @@
+name: Bug
+description: A defect with reproduction steps and a fix check.
+title: "fix: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search open issues before opening this. A draft pull request links it with `Refs #` and does not close it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong, and where it shows up.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Number the steps. Include the scene, device, or command.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Unity version, device model, OS, branch, and commit.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines, Test Runner output, or screenshots. Do not paste credentials or model weights.
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: Fix completion criteria
+      description: What must be true before the bug is considered fixed.
+    validations:
+      required: true

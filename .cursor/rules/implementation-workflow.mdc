@@ -15,3 +15,8 @@ alwaysApply: true
 8. Put new design decisions and assumptions in `docs/DECISIONS.md`.
 9. Prefer updating existing docs over creating parallel notes.
 10. Use Korean for developer-facing summaries; English for code and commits.
+11. Follow `docs/DEVELOPMENT_WORKFLOW.md` for Git work.
+12. Search open GitHub issues before creating one. Stay inside Cursor-owned paths.
+13. Use a feature branch. If this worktree has unrelated user changes, do not switch, reset, restore, or stash; use a separate worktree.
+14. Do not push or merge `main`. Do not force-push. Open or update one draft PR and link the issue with `Refs #`.
+15. In the PR, separate automatic tests, human Editor or device checks, and checks that were not run.

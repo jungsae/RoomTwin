@@ -116,6 +116,20 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         }
     }
 
+    fun benchmarkTurn(
+        settings: PlaygroundSettings,
+        question: String,
+        images: List<Uri>,
+        imageCapacity: Int,
+        schema: String?,
+    ): MeasuredTurn {
+        require(imageCapacity in 1..2 && images.size <= imageCapacity)
+        var measured: NativeTurnMetrics? = null
+        val response = stream(settings, "benchmark", question, images, schema, true, {},
+            capacity = imageCapacity, onMeasured = { measured = it })
+        return MeasuredTurn(response, checkNotNull(measured))
+    }
+
     @OptIn(ExperimentalApi::class)
     private fun stream(
         settings: PlaygroundSettings,
@@ -125,6 +139,8 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
         schema: String?,
         metrics: Boolean,
         onText: (String) -> Unit,
+        capacity: Int = images.size.coerceAtLeast(1),
+        onMeasured: ((NativeTurnMetrics) -> Unit)? = null,
     ): VisionInference {
         require(question.isNotBlank() && images.size <= 2)
         val started = TimeSource.Monotonic.markNow()
@@ -139,9 +155,11 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
             add(Content.Text(question))
         }
         selectBackend(settings.backend)
-        configureEngine(settings.contextLength, images.size.coerceAtLeast(1), metrics)
+        configureEngine(settings.contextLength, capacity, metrics)
         if (chatSettings != settings || chatKey != key || chatSchema != schema) resetPlayground()
-        val activeEngine = engine ?: initializeEngine()
+        val initialized = if (engine == null && onMeasured != null) measureTimedValue { initializeEngine() } else null
+        val activeEngine = initialized?.value ?: engine ?: initializeEngine()
+        val firstTurn = chat == null
         try {
             val conversation = chat ?: activeEngine.createConversation(
                 ConversationConfig(
@@ -193,6 +211,25 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
             }
             val elapsed = started.elapsedNow().inWholeMilliseconds
             val benchmark = if (metrics) runCatching { conversation.getBenchmarkInfo() }.getOrNull() else null
+            if (onMeasured != null) {
+                val inputTokens = benchmark?.lastPrefillTokenCount?.takeIf { it > 0 }
+                val outputTokens = benchmark?.lastDecodeTokenCount?.takeIf { it > 0 }
+                val prefillRate = benchmark?.lastPrefillTokensPerSecond?.takeIf(::positiveMeasurement)
+                val decodeRate = benchmark?.lastDecodeTokensPerSecond?.takeIf(::positiveMeasurement)
+                onMeasured(NativeTurnMetrics(
+                    initializationMillis = initialized?.duration?.inWholeMilliseconds,
+                    runtimeTtftEstimateMillis = benchmark?.timeToFirstTokenInSecond
+                        ?.takeIf { firstTurn && positiveMeasurement(it) }?.times(1000.0),
+                    prefillMillis = if (inputTokens != null && prefillRate != null) 1000.0 * inputTokens / prefillRate else null,
+                    decodeMillis = if (outputTokens != null && decodeRate != null) 1000.0 * outputTokens / decodeRate else null,
+                    inputTokens = inputTokens,
+                    outputTokens = outputTokens,
+                    prefillTokensPerSecond = prefillRate,
+                    decodeTokensPerSecond = decodeRate,
+                    contextTokens = runCatching { conversation.getTokenCount() }.getOrNull()?.takeIf { it > 0 },
+                    contextCapacity = benchmark?.maxNumTokens?.takeIf { it > 0 },
+                ))
+            }
             return VisionInference(
                 response.toString(),
                 elapsed,
@@ -206,6 +243,8 @@ class GemmaRunner(private val context: Context, private val modelFile: File? = n
             throw Failure(Error.INFERENCE_FAILED, error.javaClass.simpleName, error)
         }
     }
+
+    private fun positiveMeasurement(value: Double): Boolean = value.isFinite() && value > 0
 
     fun resetPlayground() {
         val current = chat

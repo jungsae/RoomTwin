@@ -17,6 +17,7 @@ import kotlin.math.roundToInt
 internal fun showPlaygroundSettings(
     activity: Activity,
     current: PlaygroundSettings,
+    showBackend: Boolean = true,
     onApply: (PlaygroundSettings) -> Unit,
 ) {
     val density = activity.resources.displayMetrics.density
@@ -68,7 +69,7 @@ internal fun showPlaygroundSettings(
     val contexts = PlaygroundSettings.CONTEXT_LENGTHS
     val context = choice(R.string.chat_context_length, contexts.map(Int::toString), contexts.indexOf(current.contextLength))
     val backends = InferenceBackend.entries
-    val backend = choice(R.string.chat_backend_setting, backends.map { it.name }, current.backend.ordinal)
+    val backend = if (showBackend) choice(R.string.chat_backend_setting, backends.map { it.name }, current.backend.ordinal) else null
     val thinking = Switch(activity).apply {
         setText(R.string.chat_thinking)
         isChecked = current.thinking
@@ -97,7 +98,7 @@ internal fun showPlaygroundSettings(
                     topP = topP.text.toString().replace(',', '.').toDouble(),
                     maxOutputTokens = tokens.text.toString().toInt(),
                     contextLength = contexts[context.selectedItemPosition],
-                    backend = backends[backend.selectedItemPosition],
+                    backend = backend?.let { backends[it.selectedItemPosition] } ?: current.backend,
                     thinking = thinking.isChecked,
                 )
             } catch (_: IllegalArgumentException) {

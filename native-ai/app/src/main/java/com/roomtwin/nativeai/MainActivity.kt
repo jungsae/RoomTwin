@@ -31,6 +31,13 @@ class MainActivity : Activity() {
     private lateinit var playground: PlaygroundPanel
     private lateinit var visionRoot: View
     private lateinit var visionLab: VisionLabPanel
+    private lateinit var benchmarkRoot: View
+    private lateinit var benchmark: BenchmarkPanel
+    private val benchmarkStore by lazy { BenchStore(File(application.filesDir, "benchmark-sessions")) }
+    private val benchmarkImages = arrayOfNulls<Attachment>(2)
+    private var activeBenchmark: BenchControl? = null
+    private var pendingBenchmarkExport: Pair<String, Boolean>? = null
+    private var benchmarkHistoryRequest = 0
     private lateinit var backends: RadioGroup
     private lateinit var pickImage: Button
     private lateinit var clearImage: Button
@@ -62,6 +69,15 @@ class MainActivity : Activity() {
         playground = PlaygroundPanel(this, playgroundRoot)
         visionRoot = findViewById(R.id.vision_lab_panel)
         visionLab = VisionLabPanel(this, visionRoot, ::selectLabFeature, ::labPhotoAction)
+        val benchmarkContainer = findViewById<android.widget.FrameLayout>(R.id.benchmark_lab_panel)
+        benchmarkRoot = benchmarkContainer
+        benchmark = BenchmarkPanel(
+            this, benchmarkContainer, ::benchmarkPhotoAction, ::submitBenchmark, ::stopBenchmark,
+            ::readBenchmark, ::chooseBenchmarkExport, ::deleteBenchmarks,
+        )
+        pendingBenchmarkExport = savedInstanceState?.getString(BENCHMARK_EXPORT_ID)?.let {
+            it to savedInstanceState.getBoolean(BENCHMARK_EXPORT_CSV)
+        }
         savedInstanceState?.getString(LAB_FEATURE)?.let { visionLab.select(LabFeature.valueOf(it)) }
         backends = findViewById(R.id.backends)
         pickImage = findViewById(R.id.pick_image)
@@ -153,6 +169,10 @@ class MainActivity : Activity() {
         fun changeMode() {
             if (mode == R.id.playground_mode) resetChat()
             if (mode == R.id.vision_lab_mode) resetLab()
+            if (mode == R.id.benchmark_lab_mode) {
+                benchmarkImages.indices.forEach(::clearBenchmarkPhoto)
+                benchmark.clearPrivateInput()
+            }
             showMode(id)
         }
         if (confirmation == null) {
@@ -175,6 +195,8 @@ class MainActivity : Activity() {
         roomPanel.visibility = if (id == R.id.room_mode) View.VISIBLE else View.GONE
         playgroundRoot.visibility = if (id == R.id.playground_mode) View.VISIBLE else View.GONE
         visionRoot.visibility = if (id == R.id.vision_lab_mode) View.VISIBLE else View.GONE
+        benchmarkRoot.visibility = if (id == R.id.benchmark_lab_mode) View.VISIBLE else View.GONE
+        if (id == R.id.benchmark_lab_mode) refreshBenchmarks()
     }
 
     @Suppress("DEPRECATION")
@@ -228,6 +250,13 @@ class MainActivity : Activity() {
     @Deprecated("Handles system picker and camera results.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == BENCHMARK_EXPORT) {
+            val export = pendingBenchmarkExport ?: return
+            pendingBenchmarkExport = null
+            val destination = data?.data
+            if (resultCode == RESULT_OK && destination != null) exportBenchmark(export.first, export.second, destination)
+            return
+        }
         if (requestCode == LAB_EXPORT) {
             val original = pendingExport ?: return
             pendingExport = null
@@ -249,7 +278,8 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (requestCode != ROOM_IMAGE && requestCode != PLAYGROUND_IMAGE && requestCode !in LAB_FIRST..LAB_LAST) return
+        if (requestCode != ROOM_IMAGE && requestCode != PLAYGROUND_IMAGE &&
+            requestCode !in LAB_FIRST..LAB_LAST && requestCode !in BENCHMARK_FIRST..BENCHMARK_LAST) return
         val image = data?.data
         when {
             resultCode != RESULT_OK -> imageStatus(requestCode, R.string.image_cancelled)
@@ -266,6 +296,7 @@ class MainActivity : Activity() {
         when (request) {
             ROOM_IMAGE -> status.setText(message)
             PLAYGROUND_IMAGE -> playground.setStatus(getString(message))
+            in BENCHMARK_FIRST..BENCHMARK_LAST -> benchmark.setStatus(getString(message))
             else -> visionLab.setStatus(getString(message))
         }
     }
@@ -278,8 +309,10 @@ class MainActivity : Activity() {
 
     private fun loadPreview(attachment: Attachment, request: Int) {
         val labSlot = request - LAB_FIRST
+        val benchmarkSlot = request - BENCHMARK_FIRST
         val activeTarget = when (request) {
             PLAYGROUND_IMAGE -> mode == R.id.playground_mode && !playground.imageInContext
+            in BENCHMARK_FIRST..BENCHMARK_LAST -> mode == R.id.benchmark_lab_mode && benchmarkSlot in 0 until benchmark.photoCount
             else -> mode == R.id.vision_lab_mode && labSlot in 0 until visionLab.feature.imageCount
         }
         if (!activeTarget) {
@@ -318,6 +351,11 @@ class MainActivity : Activity() {
                             playgroundImage = attachment
                             playground.setPreview(it)
                             playground.setStatus(null)
+                        } else if (request in BENCHMARK_FIRST..BENCHMARK_LAST) {
+                            clearBenchmarkPhoto(benchmarkSlot)
+                            benchmarkImages[benchmarkSlot] = attachment
+                            benchmark.setPreview(benchmarkSlot, it)
+                            benchmark.setStatus("")
                         } else {
                             releaseAttachment(labImages[labSlot])
                             labImages[labSlot] = attachment
@@ -509,6 +547,166 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun benchmarkPhotoAction(slot: Int, action: LabPhotoAction) {
+        if (busy || slot !in 0 until benchmark.photoCount) return
+        when (action) {
+            LabPhotoAction.CAMERA -> openCamera(BENCHMARK_FIRST + slot)
+            LabPhotoAction.GALLERY -> openImagePicker(BENCHMARK_FIRST + slot)
+            LabPhotoAction.REMOVE -> clearBenchmarkPhoto(slot)
+            LabPhotoAction.SAVE -> Unit
+        }
+    }
+
+    private fun clearBenchmarkPhoto(slot: Int) {
+        releaseAttachment(benchmarkImages[slot])
+        benchmarkImages[slot] = null
+        benchmark.setPreview(slot, null)
+    }
+
+    private fun submitBenchmark() {
+        if (busy || activeBenchmark != null) return
+        val (config, truth) = benchmark.configuration() ?: return
+        val photos = if (config.syntheticImages) emptyList()
+            else benchmarkImages.take(config.photoCount).mapNotNull { it?.uri }
+        if (!config.syntheticImages && photos.size != config.photoCount) {
+            benchmark.setStatus(getString(R.string.lab_pick_needed))
+            return
+        }
+        if (config.needsMobileConfirmation) {
+            AlertDialog.Builder(this)
+                .setTitle("고부하 실험")
+                .setMessage("Context 8192 또는 다중 이미지 반복은 높은 메모리 사용과 발열을 유발할 수 있습니다. " +
+                    "이번 세션은 최대 ${config.plannedTrials}회입니다. Android가 심각한 발열을 보고하면 다음 요청을 건너뜁니다.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("실행") { _, _ -> startBenchmark(config, photos, truth) }
+                .show()
+        } else startBenchmark(config, photos, truth)
+    }
+
+    private fun startBenchmark(config: BenchConfig, photos: List<Uri>, truth: VisionTruth?) {
+        if (busy || activeBenchmark != null) return
+        val execution = BenchControl()
+        activeBenchmark = execution
+        val runner = BenchmarkRunner(application, benchmarkStore)
+        benchmark.setStatus("실험 입력을 준비하는 중입니다.")
+        setBusy(true)
+        benchmark.setRunning(true)
+        submit({ engine ->
+            runner.run(engine, config, photos, truth, execution) { progress ->
+                runOnUiThread {
+                    if (active.get() && activeBenchmark === execution) benchmark.showProgress(progress)
+                }
+            }
+        }) { result ->
+            activeBenchmark = null
+            benchmark.setRunning(false)
+            result.fold(
+                onSuccess = {
+                    benchmark.showSession(it)
+                    benchmark.setStatus(BenchmarkDashboard.endLabel(it.end))
+                    refreshBenchmarks(it.header.id)
+                },
+                onFailure = {
+                    val message = if (it is OutOfMemoryError) getString(R.string.memory_failed)
+                        else "벤치마크 작업에 실패했습니다 (${it.javaClass.simpleName})."
+                    benchmark.setStatus(message)
+                    refreshBenchmarks()
+                },
+            )
+        }
+    }
+
+    private fun stopBenchmark() {
+        val execution = activeBenchmark ?: return
+        execution.stop()
+        benchmark.markStopping()
+    }
+
+    private fun refreshBenchmarks(selected: String? = null) {
+        val request = ++benchmarkHistoryRequest
+        inference.execute {
+            val entries = runCatching { benchmarkStore.headers() }.getOrDefault(emptyList())
+            runOnUiThread {
+                if (active.get() && mode == R.id.benchmark_lab_mode && request == benchmarkHistoryRequest) {
+                    benchmark.setHistory(entries, selected)
+                }
+            }
+        }
+    }
+
+    private fun readBenchmark(id: String) {
+        val request = ++benchmarkHistoryRequest
+        inference.execute {
+            val result = runCatching { benchmarkStore.session(id) }
+            runOnUiThread {
+                if (!active.get() || mode != R.id.benchmark_lab_mode || request != benchmarkHistoryRequest) return@runOnUiThread
+                result.onSuccess(benchmark::showSession).onFailure {
+                    benchmark.showSession(null)
+                    benchmark.setStatus("선택한 세션을 읽을 수 없습니다.")
+                }
+            }
+        }
+    }
+
+    private fun deleteBenchmarks(id: String?) {
+        if (busy) return
+        AlertDialog.Builder(this)
+            .setMessage(if (id == null) "저장된 Benchmark Lab 세션을 모두 삭제할까요?" else "선택한 세션을 삭제할까요?")
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("삭제") { _, _ ->
+                setBusy(true)
+                inference.execute {
+                    val deleted = runCatching {
+                        if (id == null) {
+                            benchmarkStore.deleteAll()
+                            benchmarkStore.headers().isEmpty()
+                        } else benchmarkStore.delete(id)
+                    }.getOrDefault(false)
+                    runOnUiThread {
+                        if (!active.get()) return@runOnUiThread
+                        setBusy(false)
+                        benchmark.setStatus(if (deleted) "기록을 삭제했습니다." else "일부 기록을 삭제하지 못했습니다.")
+                        refreshBenchmarks()
+                    }
+                }
+            }
+            .show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun chooseBenchmarkExport(id: String, csv: Boolean) {
+        if (busy || pendingBenchmarkExport != null) return
+        val suffix = if (csv) "csv" else "jsonl"
+        val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = if (csv) "text/csv" else "application/x-ndjson"
+            putExtra(Intent.EXTRA_TITLE, "roomtwin-$id.$suffix")
+            putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+        }
+        pendingBenchmarkExport = id to csv
+        try {
+            startActivityForResult(create, BENCHMARK_EXPORT)
+        } catch (_: ActivityNotFoundException) {
+            pendingBenchmarkExport = null
+            benchmark.setStatus("내보낼 위치를 선택할 수 없습니다.")
+        }
+    }
+
+    private fun exportBenchmark(id: String, csv: Boolean, destination: Uri) {
+        setBusy(true)
+        val resolver = contentResolver
+        inference.execute {
+            val saved = runCatching {
+                checkNotNull(resolver.openOutputStream(destination, "wt")).use { benchmarkStore.export(id, csv, it) }
+            }.isSuccess
+            runOnUiThread {
+                if (!active.get()) return@runOnUiThread
+                setBusy(false)
+                benchmark.setStatus(if (saved) "선택한 위치에 실험 기록을 내보냈습니다." else "실험 기록을 내보내지 못했습니다.")
+            }
+        }
+    }
+
     private fun clearRoomOutput() {
         response.text = ""
         timings.visibility = View.GONE
@@ -614,6 +812,7 @@ class MainActivity : Activity() {
         listOf(pickImage, clearImage, analyzeRoom).forEach { it.isEnabled = !value }
         playground.setEnabled(!value)
         visionLab.setEnabled(!value)
+        benchmark.setEnabled(!value)
     }
 
     @Suppress("DEPRECATION")
@@ -633,6 +832,10 @@ class MainActivity : Activity() {
         outState.putInt(MODE, mode)
         outState.putString(LAB_FEATURE, visionLab.feature.name)
         outState.putInt(CAPTURE_TARGET, captureTarget)
+        pendingBenchmarkExport?.let {
+            outState.putString(BENCHMARK_EXPORT_ID, it.first)
+            outState.putBoolean(BENCHMARK_EXPORT_CSV, it.second)
+        }
         pendingCapture?.let { outState.putString(PENDING_CAPTURE, it.name) }
         pendingExport?.let {
             outState.putString(EXPORT_URI, it.uri.toString())
@@ -643,7 +846,9 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         active.set(false)
+        activeBenchmark?.stop()
         inference.release(owner)
+        benchmarkImages.forEach(::releaseAttachment)
         releaseAttachment(playgroundImage)
         labImages.forEach { photo ->
             if (photo?.uri != pendingExport?.uri || isFinishing) releaseAttachment(photo)
@@ -681,6 +886,11 @@ class MainActivity : Activity() {
         const val LAB_LAST = 5
         const val LAB_EXPORT = 6
         const val LAB_FEATURE = "visionLabFeature"
+        const val BENCHMARK_FIRST = 7
+        const val BENCHMARK_LAST = 8
+        const val BENCHMARK_EXPORT = 9
+        const val BENCHMARK_EXPORT_ID = "benchmarkExportId"
+        const val BENCHMARK_EXPORT_CSV = "benchmarkExportCsv"
         const val CAPTURE_TARGET = "visionLabCaptureTarget"
         const val EXPORT_URI = "visionLabExportUri"
         const val EXPORT_FILE = "visionLabExportFile"

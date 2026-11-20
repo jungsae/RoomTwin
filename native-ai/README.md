@@ -47,7 +47,11 @@ adb shell am start -n com.roomtwin.nativeai/.MainActivity
 
 ## Vision Lab
 
-같은 오프라인 모델로 사진을 조사하거나 퀴즈·변화 비교·물건 확인·번역·공간 분석을 실험할 수 있다. [Vision Lab 사용법과 지원 범위](docs/VISION_LAB.md)
+같은 오프라인 모델로 장면 이해·시각 추론·변화 감지·객체 위치 추론·이미지 번역·공간 분석을 실험할 수 있다. [Vision Lab 사용법과 지원 범위](docs/VISION_LAB.md)
+
+## Benchmark Lab
+
+CPU/GPU 반복 실행, 컨텍스트·시각 평가, 지연·토큰·시스템 자원 관측을 지원한다. 앱에서 세션을 조회하고 JSONL이나 CSV로 내보낼 수 있다. [실험 조건과 측정 기준](docs/BENCHMARK_LAB.md)
 
 ## 실내 사진 분석
 

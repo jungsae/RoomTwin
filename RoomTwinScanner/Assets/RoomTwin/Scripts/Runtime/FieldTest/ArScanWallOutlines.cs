@@ -24,10 +24,29 @@ namespace RoomTwin.AR
 
         Material runtimeMaterial;
 
-        public void Sync(ARPlaneManager manager, string selectedId, string partnerId, bool emphasizeSelected)
+        public void Sync(
+            ARPlaneManager manager,
+            string selectedId,
+            string partnerId,
+            bool emphasizeSelected,
+            bool hideAll,
+            ICollection<string> visibleIds)
         {
             if (manager == null)
             {
+                return;
+            }
+
+            if (hideAll)
+            {
+                foreach (KeyValuePair<TrackableId, LineRenderer> pair in lines)
+                {
+                    if (pair.Value != null)
+                    {
+                        pair.Value.enabled = false;
+                    }
+                }
+
                 return;
             }
 
@@ -39,10 +58,22 @@ namespace RoomTwin.AR
                     continue;
                 }
 
+                string id = plane.trackableId.ToString();
+                bool shown = visibleIds != null && (visibleIds.Contains(id) || id == selectedId || id == partnerId);
+                if (!shown)
+                {
+                    if (lines.TryGetValue(plane.trackableId, out LineRenderer hidden) && hidden != null)
+                    {
+                        hidden.enabled = false;
+                    }
+
+                    continue;
+                }
+
                 LineRenderer line = GetLine(plane.trackableId, material);
+                line.enabled = true;
                 line.transform.SetPositionAndRotation(plane.transform.position, plane.transform.rotation);
                 WriteBoundary(line, plane);
-                string id = plane.trackableId.ToString();
                 bool selected = id == selectedId;
                 line.startColor = line.endColor = selected ? Selected : id == partnerId ? Partner : Idle;
                 line.startWidth = line.endWidth = selected && emphasizeSelected ? 0.02f : 0.008f;

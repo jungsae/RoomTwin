@@ -140,6 +140,17 @@ namespace RoomTwin.Geometry
             return true;
         }
 
+        public bool UndoLast()
+        {
+            if (corners.Count == 0)
+            {
+                return false;
+            }
+
+            corners.RemoveAt(corners.Count - 1);
+            return true;
+        }
+
         public void Reset()
         {
             corners.Clear();

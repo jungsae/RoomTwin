@@ -24,6 +24,7 @@ namespace RoomTwin.AR
         RectTransform topBar;
         RectTransform bottomBar;
         RectTransform resetButton;
+        RectTransform undoButton;
         RectTransform developerButton;
         RectTransform debugPanel;
         Text headline;
@@ -143,6 +144,16 @@ namespace RoomTwin.AR
             button.onClick.AddListener(action);
         }
 
+        public void BindUndo(UnityAction action)
+        {
+            if ((!IsReady && !TryInitialize(out _)) || undoButton == null || action == null)
+            {
+                return;
+            }
+
+            undoButton.GetComponent<Button>().onClick.AddListener(action);
+        }
+
         public void SetDeveloperVisible(bool visible)
         {
             developerVisible = visible;
@@ -170,6 +181,7 @@ namespace RoomTwin.AR
             return Contains(topBar, screenPoint)
                 || Contains(bottomBar, screenPoint)
                 || Contains(resetButton, screenPoint)
+                || Contains(undoButton, screenPoint)
                 || Contains(developerButton, screenPoint)
                 || (developerVisible && Contains(debugPanel, screenPoint));
         }
@@ -194,6 +206,7 @@ namespace RoomTwin.AR
             topBar = null;
             bottomBar = null;
             resetButton = null;
+            undoButton = null;
             developerButton = null;
             debugPanel = null;
             if (canvasObject != null)
@@ -238,7 +251,9 @@ namespace RoomTwin.AR
             SetStretch(guidance.rectTransform, 0.04f, 0.42f, 0.72f, 0.92f);
             SetStretch(progress.rectTransform, 0.04f, 0.08f, 0.72f, 0.4f);
 
-            resetButton = CreateButton(safeRoot, font, "Reset", 32);
+            resetButton = CreateButton(safeRoot, font, "새 스캔", 28);
+            undoButton = CreateButton(safeRoot, font, "취소", 28);
+            undoButton.anchoredPosition = new Vector2(-24f - ButtonSize - 16f, 24f);
             developerButton = CreateButton(safeRoot, font, "개발", 26);
             developerButton.anchorMin = new Vector2(0f, 0f);
             developerButton.anchorMax = new Vector2(0f, 0f);
@@ -251,7 +266,44 @@ namespace RoomTwin.AR
             debugPanel.anchoredPosition = new Vector2(0f, -BarHeight - 8f);
             debugTextLabel = CreateLabel(debugPanel, font, 24, TextAnchor.UpperLeft);
             debugPanel.gameObject.SetActive(false);
+            CreateDebugAction(debugPanel, font, "로그 복사", 0.05f, ExportClicked);
+            CreateDebugAction(debugPanel, font, "로그 삭제", 0.52f, DeleteClicked);
             ApplySafeArea();
+        }
+
+        UnityAction exportClicked;
+        UnityAction deleteClicked;
+
+        void ExportClicked()
+        {
+            exportClicked?.Invoke();
+        }
+
+        void DeleteClicked()
+        {
+            deleteClicked?.Invoke();
+        }
+
+        public void BindLogActions(UnityAction exportAction, UnityAction deleteAction)
+        {
+            exportClicked = exportAction;
+            deleteClicked = deleteAction;
+        }
+
+        static void CreateDebugAction(RectTransform parent, Font font, string label, float anchorMinX, UnityEngine.Events.UnityAction action)
+        {
+            RectTransform rect = CreateRect(label, parent);
+            rect.anchorMin = new Vector2(anchorMinX, 0f);
+            rect.anchorMax = new Vector2(anchorMinX + 0.43f, 0.28f);
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            var image = rect.gameObject.AddComponent<Image>();
+            image.color = new Color(0.2f, 0.2f, 0.2f, 0.9f);
+            var button = rect.gameObject.AddComponent<Button>();
+            button.targetGraphic = image;
+            button.onClick.AddListener(action);
+            Text text = CreateLabel(rect, font, 22, TextAnchor.MiddleCenter);
+            text.text = label;
         }
 
         Font LoadFont()

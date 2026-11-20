@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
@@ -57,8 +58,13 @@ namespace RoomTwin.AR
         readonly List<DetectedWall> verticalWalls = new List<DetectedWall>(8);
         ArScanHud hud;
         ArScanWallOutlines outlines;
+        readonly List<string> visibleWallIds = new List<string>(8);
         string highlightedSelected = string.Empty;
         string highlightedOther = string.Empty;
+        ScanSessionLog sessionLog;
+        bool waitingForRescan;
+        float nextSnapshotTime;
+        string logStatus = "starting";
         float pulseUntil;
         float presentationTimer;
         Transform pulseMarker;
@@ -115,6 +121,7 @@ namespace RoomTwin.AR
                 }
 
                 ControllerInitSucceeded = true;
+                BeginSessionLog();
                 Debug.Log(LogTag + " controller-init=success");
             }
             catch (Exception ex)
@@ -143,7 +150,9 @@ namespace RoomTwin.AR
                     return;
                 }
 
-                hud.BindReset(ResetCapture);
+                hud.BindReset(StartNewScan);
+                hud.BindUndo(UndoLastCorner);
+                hud.BindLogActions(ExportLog, DeleteLogs);
                 RefreshPresentation();
             }
             catch (Exception ex)
@@ -171,6 +180,98 @@ namespace RoomTwin.AR
         {
             ARSession.stateChanged -= OnSessionStateChanged;
             EnhancedTouchSupport.Disable();
+            sessionLog?.Write("session-end", "\"accepted\":" + (sessionLog?.AcceptedCount ?? 0).ToString(CultureInfo.InvariantCulture));
+            sessionLog?.DisposeWriter();
+            sessionLog = null;
+        }
+
+        void ExportLog()
+        {
+            string directory = Path.Combine(Application.persistentDataPath, "Logs");
+            string exported = ScanSessionLog.ExportLatest(directory);
+            status = exported == null ? "저장된 로그가 없습니다." : exported;
+            Debug.Log(LogTag + " log-export=" + (exported ?? "none"));
+        }
+
+        void DeleteLogs()
+        {
+            string directory = Path.Combine(Application.persistentDataPath, "Logs");
+            ScanSessionLog.DeleteAll(directory);
+            logStatus = "deleted";
+            status = "저장된 스캔 로그를 삭제했습니다.";
+            Debug.Log(LogTag + " log-delete path=" + directory);
+        }
+
+        void BeginSessionLog()
+        {
+            sessionLog?.DisposeWriter();
+            string directory = Path.Combine(Application.persistentDataPath, "Logs");
+            sessionLog = ScanSessionLog.Start(directory, Application.version, "c9a5169+", SystemInfo.deviceModel);
+            logStatus = sessionLog.IsRecording ? "recording" : "failed";
+            if (!sessionLog.IsRecording)
+            {
+                Debug.LogError(LogTag + " log-open=failure path=" + sessionLog.FilePath);
+            }
+        }
+
+        void WriteSnapshotIfDue()
+        {
+            if (sessionLog == null || !sessionLog.IsRecording || Time.unscaledTime < nextSnapshotTime)
+            {
+                return;
+            }
+
+            nextSnapshotTime = Time.unscaledTime + 2f;
+            Vector3 position = arCamera != null ? arCamera.transform.position : Vector3.zero;
+            Vector3 euler = arCamera != null ? arCamera.transform.eulerAngles : Vector3.zero;
+            sessionLog.Write(
+                "snapshot",
+                "\"tracking\":" + ScanSessionLog.Quote(ARSession.state.ToString()) +
+                ",\"cameraPos\":" + JsonVector(position) +
+                ",\"cameraEuler\":" + JsonVector(euler) +
+                ",\"verticalWalls\":" + CountVerticalWalls().ToString(CultureInfo.InvariantCulture) +
+                ",\"corners\":" + capture.Count.ToString(CultureInfo.InvariantCulture) +
+                ",\"planes\":" + PlaneSnapshotJson());
+        }
+
+        string PlaneSnapshotJson()
+        {
+            if (planeManager == null)
+            {
+                return "[]";
+            }
+
+            var builder = new StringBuilder(256);
+            builder.Append('[');
+            bool any = false;
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (any)
+                {
+                    builder.Append(',');
+                }
+
+                any = true;
+                builder.Append("{\"id\":").Append(ScanSessionLog.Quote(plane.trackableId.ToString()));
+                builder.Append(",\"alignment\":").Append(ScanSessionLog.Quote(plane.alignment.ToString()));
+                builder.Append(",\"center\":").Append(JsonVector(plane.center));
+                builder.Append(",\"normal\":").Append(JsonVector(plane.normal));
+                builder.Append(",\"area\":").Append((plane.size.x * plane.size.y).ToString("0.00", CultureInfo.InvariantCulture));
+                builder.Append('}');
+            }
+
+            builder.Append(']');
+            return builder.ToString();
+        }
+
+        static string JsonVector(Vector3 value)
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "[{0:0.000},{1:0.000},{2:0.000}]",
+                value.x,
+                value.y,
+                value.z);
         }
 
         void Update()
@@ -225,12 +326,52 @@ namespace RoomTwin.AR
             return count;
         }
 
+        public void UndoLastCorner()
+        {
+            if (!capture.UndoLast())
+            {
+                status = "취소할 모서리가 없습니다.";
+                return;
+            }
+
+            meshBuilt = false;
+            DestroyChild(roomAnchor);
+            roomAnchor = null;
+            RemoveLastMarker();
+            lastRejection = string.Empty;
+            status = "마지막 모서리 추정을 취소했습니다. 스캔 데이터는 유지됩니다.";
+            sessionLog?.Write("undo", "\"corners\":" + capture.Count.ToString(CultureInfo.InvariantCulture));
+            Debug.Log(LogTag + " undo corners=" + capture.Count);
+            RefreshPresentation();
+        }
+
+        public void StartNewScan()
+        {
+            ClearLocalScan();
+            waitingForRescan = arSession != null;
+            if (arSession != null)
+            {
+                arSession.Reset();
+            }
+
+            BeginSessionLog();
+            status = waitingForRescan
+                ? "새 스캔을 준비 중입니다. 추적이 다시 잡힐 때까지 모서리를 확정하지 않습니다."
+                : "새 스캔을 시작했습니다. 벽을 선택하세요.";
+            Debug.Log(LogTag + " new-scan session=" + (sessionLog != null ? sessionLog.SessionId : "none") + " waiting=" + waitingForRescan);
+            RefreshPresentation();
+        }
+
         public void ResetCapture()
+        {
+            StartNewScan();
+        }
+
+        void ClearLocalScan()
         {
             capture.Reset();
             meshBuilt = false;
             lastRejection = string.Empty;
-            status = "Select a wall. The corner is the wall intersection, not the touch point.";
             DestroyChild(markerRoot);
             DestroyChild(roomAnchor);
             markerRoot = null;
@@ -238,13 +379,29 @@ namespace RoomTwin.AR
             pulseMarker = null;
             highlightedSelected = string.Empty;
             highlightedOther = string.Empty;
+            visibleWallIds.Clear();
             hud?.ClearFailureDisplay();
-            RefreshPresentation();
-            Debug.Log($"{LogTag} reset referenceFloorY=cleared");
+            Debug.Log(LogTag + " reset referenceFloorY=cleared");
+        }
+
+        void RemoveLastMarker()
+        {
+            if (markerRoot == null || markerRoot.childCount == 0)
+            {
+                return;
+            }
+
+            Destroy(markerRoot.GetChild(markerRoot.childCount - 1).gameObject);
         }
 
         void TrySelectCorner(Vector2 screen)
         {
+            if (waitingForRescan || ARSession.state != ARSessionState.SessionTracking)
+            {
+                Reject("AR tracking is not ready. Wait before confirming a corner.");
+                return;
+            }
+
             if (arCamera == null || raycastManager == null)
             {
                 Reject("AR camera or ARRaycastManager is missing.");
@@ -318,6 +475,13 @@ namespace RoomTwin.AR
 
             EnsureMarkerRoot();
             CreateMarker(capture.Count, corner);
+            sessionLog?.Accept();
+            sessionLog?.Write(
+                "corner",
+                "\"index\":" + capture.Count.ToString(CultureInfo.InvariantCulture) +
+                ",\"corner\":" + JsonVector(corner) +
+                ",\"selected\":" + ScanSessionLog.Quote(estimate.SelectedWallId) +
+                ",\"other\":" + ScanSessionLog.Quote(estimate.OtherWallId));
             highlightedSelected = estimate.SelectedWallId;
             highlightedOther = estimate.OtherWallId;
             pulseUntil = Time.time + 0.35f;
@@ -513,14 +677,23 @@ namespace RoomTwin.AR
         void Reject(string reason)
         {
             lastRejection = reason;
-            status = reason;
+            status = ScanFeedback.ToKorean(reason);
+            sessionLog?.Reject();
+            sessionLog?.Write("reject", "\"reason\":" + ScanSessionLog.Quote(reason));
             Debug.LogWarning($"{LogTag} rejected \"{reason}\"");
         }
 
         void OnSessionStateChanged(ARSessionStateChangedEventArgs args)
         {
             Debug.Log($"{LogTag} tracking {lastSessionState} -> {args.state}");
+            sessionLog?.Write("tracking", "\"from\":" + ScanSessionLog.Quote(lastSessionState.ToString()) + ",\"to\":" + ScanSessionLog.Quote(args.state.ToString()));
             lastSessionState = args.state;
+            if (waitingForRescan && args.state == ARSessionState.SessionTracking)
+            {
+                waitingForRescan = false;
+                status = "추적이 다시 준비됐습니다. 벽을 선택하세요.";
+                Debug.Log(LogTag + " rescan-ready=true");
+            }
         }
 
         void EnsureMarkerRoot()
@@ -663,7 +836,28 @@ namespace RoomTwin.AR
             meshObject.transform.SetParent(parent, false);
             meshObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             MeshRenderer renderer = meshObject.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = material != null ? material : CreateUnlit(objectName, fallback);
+            renderer.sharedMaterial = CreateScanMaterial(objectName == "Floor");
+        }
+
+        static Material CreateScanMaterial(bool floor)
+        {
+            Shader shader = Shader.Find("RoomTwin/ArPlaneTransparent");
+            if (shader == null)
+            {
+                shader = Shader.Find("Universal Render Pipeline/Unlit");
+            }
+
+            var material = new Material(shader);
+            Color color = floor
+                ? new Color(0.55f, 0.62f, 0.4f, 0.16f)
+                : new Color(0.55f, 0.75f, 0.9f, 0.22f);
+            material.color = color;
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", color);
+            }
+
+            return material;
         }
 
         static Material CreateUnlit(string materialName, Color color)
@@ -750,7 +944,9 @@ namespace RoomTwin.AR
             {
                 hud.Apply(snapshot, failure, BuildDebugText(candidateFloorY, floorChosen));
             }
-            outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil);
+            CollectVisibleWalls();
+            outlines?.Sync(planeManager, highlightedSelected, highlightedOther, Time.time < pulseUntil, meshBuilt, visibleWallIds);
+            WriteSnapshotIfDue();
         }
 
         void CollectFloorSamples()
@@ -857,7 +1053,63 @@ namespace RoomTwin.AR
             logBuilder.Append("\nCorners: ").Append(capture.Count).Append("/4");
             logBuilder.Append("\nLast failure: ");
             logBuilder.Append(string.IsNullOrEmpty(lastRejection) ? "none" : lastRejection);
+            logBuilder.Append("\nLog: ").Append(logStatus);
+            if (sessionLog != null)
+            {
+                logBuilder.Append("\n").Append(sessionLog.FilePath);
+                logBuilder.Append("\naccepted=").Append(sessionLog.AcceptedCount.ToString(CultureInfo.InvariantCulture));
+                logBuilder.Append(" rejected=").Append(sessionLog.RejectedCount.ToString(CultureInfo.InvariantCulture));
+            }
+
             return logBuilder.ToString();
+        }
+
+        void CollectVisibleWalls()
+        {
+            visibleWallIds.Clear();
+            if (meshBuilt || planeManager == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(highlightedSelected))
+            {
+                visibleWallIds.Add(highlightedSelected);
+            }
+
+            if (!string.IsNullOrEmpty(highlightedOther))
+            {
+                visibleWallIds.Add(highlightedOther);
+            }
+
+            string largestId = null;
+            float largestArea = 0f;
+            int shown = visibleWallIds.Count;
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment != PlaneAlignment.Vertical || shown >= 4)
+                {
+                    continue;
+                }
+
+                float area = plane.size.x * plane.size.y;
+                string id = plane.trackableId.ToString();
+                if (visibleWallIds.Contains(id))
+                {
+                    continue;
+                }
+
+                if (area > largestArea)
+                {
+                    largestArea = area;
+                    largestId = id;
+                }
+            }
+
+            if (largestId != null && shown < 4)
+            {
+                visibleWallIds.Add(largestId);
+            }
         }
 
         static bool TryGetPressScreenPosition(out Vector2 screenPosition)

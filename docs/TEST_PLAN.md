@@ -43,6 +43,17 @@
 
 Developer result on 2026-11-20, Unity `6000.6.9f1`, commit `69c80fa`: the floor and four walls were visible; corner and height edits rebuilt; a bad corner order warned; the sample was restored to 4 m × 3 m × 2.4 m. Edit Mode `RoomTwin.Geometry.Tests` reported 7 passed, 0 failed, 0.016 s. The Console showed 0 errors. This was a local Test Runner run, not CI.
 
+## Scan log pull
+
+Logs are JSONL files under the app-specific directory. No broad storage permission is required, and camera frames are not saved.
+
+```text
+adb shell ls /sdcard/Android/data/com.roomtwin.scanner/files/Logs
+adb pull /sdcard/Android/data/com.roomtwin.scanner/files/Logs
+```
+
+Each `planes` snapshot can be read back by a reconstruction test. It stores plane id, alignment, center, normal, and area.
+
 ## AR Field Test v0.1
 
 Not a survey. The user taps four floor points. ARCore does not detect the real wall corners, and a raycast can miss outside a detected plane.

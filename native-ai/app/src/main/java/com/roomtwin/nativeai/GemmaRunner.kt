@@ -50,8 +50,8 @@ internal class GemmaRunner(private val context: Context) : AutoCloseable {
         Log.i(TAG, "selected=$backend")
     }
 
-    fun analyzeRoom(image: Uri): GemmaInference = infer(
-        RoomAnalysisJson.prompt, image, maxOutputTokens = 768,
+    fun analyzeRoom(image: Uri, prompt: String = RoomAnalysisJson.prompt): GemmaInference = infer(
+        prompt, image, maxOutputTokens = 768,
         responseFormat = ResponseFormat.json(RoomAnalysisJson.generationSchema),
     )
 

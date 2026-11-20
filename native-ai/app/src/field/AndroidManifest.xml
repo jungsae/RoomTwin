@@ -2,4 +2,7 @@
     <instrumentation
         android:name="com.roomtwin.nativeai.BenchmarkInstrumentation"
         android:targetPackage="${applicationId}" />
+    <instrumentation
+        android:name="com.roomtwin.nativeai.RoomQualityInstrumentation"
+        android:targetPackage="${applicationId}" />
 </manifest>

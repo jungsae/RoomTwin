@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - "native-ai/**"
+      - ".github/workflows/native-ai-ci.yml"
   push:
     branches:
       - main
@@ -53,9 +54,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install Android SDK packages
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4

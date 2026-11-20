@@ -9,7 +9,7 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Establish empty module folders / asmdefs as needed
 - Editor mock room data path
 
-## Phase 1 — AR Measurement
+## Phase 1 — Geometry
 
 - Plane / raycast capture on device
 - Convert to meter estimates with uncertainty flags
@@ -20,6 +20,7 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Build floor + walls from measurements
 - Room-local coordinate frame
 - Visual preview in AR and/or free camera
+- Editor slice started: `GeometrySandbox` builds one convex quad (floor + four walls) without AR input
 
 ## Phase 3 — Manual Correction
 
@@ -44,6 +45,15 @@ Phases are sequential for the MVP vertical slice. Later phases may start design 
 - Better scanning (depth fusion, meshing) if device evidence supports it
 - Export / share formats
 
+## Status note (numbers unchanged)
+
+The phase numbers above are kept. Two labels currently overlap, and this file does not renumber them:
+
+- The Phase 1 heading says Geometry, while its bullets still describe AR measurement capture.
+- Phase 2 is 3D room generation, and its last bullet is the Editor `GeometrySandbox` that has already been built.
+
+D-009 records the proposal: restore the Phase 1 heading to AR Measurement and leave the sandbox bullet under Phase 2, only after the user chooses. The next implementation branch is `feat/ar-fieldtest`. It does not add a phase. Device checks and Editor tests are not GitHub Actions results.
+
 ## Current Focus
 
-Phase 0 (documentation done in this pass; package/code work is next when requested).
+`GeometrySandbox` is in `origin/main` at `69c80fa` and has been checked in the Unity Editor. Phase 0 AR probe behavior has a separate developer device check. AR raycast input into the room model, save/load, and furniture are still later work. Git workflow setup does not change those phases.

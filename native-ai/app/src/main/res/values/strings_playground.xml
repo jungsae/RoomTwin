@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_mode">Room Analysis</string>
+    <string name="playground_mode">Playground</string>
+    <string name="chat_settings">생성 설정</string>
+    <string name="chat_reset">새 대화</string>
+    <string name="chat_camera">카메라</string>
+    <string name="chat_gallery">갤러리</string>
+    <string name="chat_detach">첨부 제거</string>
+    <string name="chat_preview">첨부 이미지 미리보기</string>
+    <string name="chat_question_hint">메시지 입력</string>
+    <string name="chat_send">보내기</string>
+    <string name="chat_you">나</string>
+    <string name="chat_model">Gemma</string>
+    <string name="chat_backend_label">오프라인 · %1$s</string>
+    <string name="chat_empty">Gemma와 대화를 시작하세요. 사진을 첨부하면 문서를 읽거나 사진 속 물건을 물을 수 있습니다.</string>
+    <string name="chat_attached">사진 첨부</string>
+    <string name="chat_image_context">이 사진에 대해 이어서 질문할 수 있습니다. 다른 사진은 새 대화에서 첨부하세요.</string>
+    <string name="chat_no_camera">기기에서 카메라를 열 수 없습니다.</string>
+    <string name="chat_image_loading">이미지를 불러오는 중</string>
+    <string name="chat_reset_confirmation">현재 대화와 사진 문맥을 지우고 새 대화를 시작할까요?</string>
+    <string name="chat_leave_mode">모드를 전환하면 현재 Playground 대화가 초기화됩니다.</string>
+    <string name="chat_continue">전환</string>
+    <string name="chat_reset_after_error">%1$s 새 대화에서 다시 시도할 수 있습니다.</string>
+    <string name="chat_settings_note">설정을 바꾸면 새 대화를 시작합니다. 컨텍스트가 길수록 메모리를 더 사용합니다.</string>
+    <string name="chat_system_prompt">시스템 프롬프트</string>
+    <string name="chat_temperature">Temperature (0–2)</string>
+    <string name="chat_top_k">Top-K (1–64)</string>
+    <string name="chat_top_p">Top-P (0–1)</string>
+    <string name="chat_output_tokens">최대 출력 토큰 (1–1024)</string>
+    <string name="chat_context_length">컨텍스트 길이 (토큰)</string>
+    <string name="chat_backend_setting">추론 백엔드</string>
+    <string name="chat_thinking">Thinking 모드</string>
+    <string name="chat_settings_invalid">설정값과 허용 범위를 확인해 주세요.</string>
+    <string name="chat_apply">적용</string>
+</resources>

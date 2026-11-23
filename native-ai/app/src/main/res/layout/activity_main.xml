@@ -1,130 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/screen"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:clipToPadding="false">
+    android:orientation="vertical">
 
-    <LinearLayout
+    <RadioGroup
+        android:id="@+id/modes"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:checkedButton="@id/room_mode"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:saveEnabled="false">
 
-        <TextView
-            android:layout_width="match_parent"
+        <RadioButton
+            android:id="@+id/room_mode"
+            style="@style/ExperimentModeTab"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textAppearance="?android:attr/textAppearanceLarge" />
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/room_mode" />
 
-        <RadioGroup
-            android:id="@+id/backends"
-            android:layout_width="match_parent"
+        <RadioButton
+            android:id="@+id/playground_mode"
+            style="@style/ExperimentModeTab"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:checkedButton="@id/cpu"
-            android:orientation="horizontal">
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/playground_mode" />
 
-            <RadioButton
-                android:id="@+id/cpu"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="@string/backend_cpu" />
-
-            <RadioButton
-                android:id="@+id/gpu"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="@string/backend_gpu" />
-        </RadioGroup>
-
-        <EditText
-            android:id="@+id/prompt"
-            android:layout_width="match_parent"
+        <RadioButton
+            android:id="@+id/vision_lab_mode"
+            style="@style/ExperimentModeTab"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="top|start"
-            android:hint="@string/prompt_hint"
-            android:importantForAutofill="no"
-            android:inputType="textMultiLine|textCapSentences"
-            android:maxLength="1000"
-            android:minLines="3"
-            android:saveEnabled="false" />
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/vision_lab_mode" />
 
-        <Button
-            android:id="@+id/pick_image"
-            android:layout_width="match_parent"
+        <RadioButton
+            android:id="@+id/benchmark_lab_mode"
+            style="@style/ExperimentModeTab"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/pick_image" />
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:saveEnabled="false"
+            android:text="@string/benchmark_lab_mode" />
+    </RadioGroup>
 
-        <Button
-            android:id="@+id/clear_image"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/clear_image"
-            android:visibility="gone" />
+    <include
+        android:id="@+id/room_panel"
+        layout="@layout/view_room_analysis" />
 
-        <Button
-            android:id="@+id/run_inference"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/run_inference" />
+    <include
+        android:id="@+id/playground_panel"
+        layout="@layout/view_playground"
+        android:visibility="gone" />
 
-        <Button
-            android:id="@+id/analyze_room"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/analyze_room" />
+    <include
+        android:id="@+id/vision_lab_panel"
+        layout="@layout/view_vision_lab"
+        android:visibility="gone" />
 
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:accessibilityLiveRegion="polite"
-            android:text="@string/ready" />
-
-        <TextView
-            android:id="@+id/timings"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/raw_header"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/raw_response"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/response"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textIsSelectable="true" />
-
-        <TextView
-            android:id="@+id/validated_header"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/validated_response"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/validated_json"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:visibility="gone" />
-
-    </LinearLayout>
-</ScrollView>
+    <FrameLayout
+        android:id="@+id/benchmark_lab_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+</LinearLayout>

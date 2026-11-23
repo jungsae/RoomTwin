@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="benchmark_lab_mode">Benchmark Lab</string>
+    <string name="benchmark_generation_summary">Context %1$d · 최대 출력 %2$d · Thinking %3$s</string>
+    <string name="benchmark_history_timestamp">%1$s · %2$s</string>
+</resources>

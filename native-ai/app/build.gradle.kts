@@ -2,6 +2,13 @@ plugins {
     id("com.android.application")
 }
 
+val gitSha = runCatching {
+    providers.exec {
+        commandLine("git", "rev-parse", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().takeIf { it.matches(Regex("[0-9a-f]{40}")) }
+}.getOrNull() ?: "N/A"
+
 android {
     namespace = "com.roomtwin.nativeai"
     compileSdk = 36
@@ -12,11 +19,14 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
         ndk {
             abiFilters += "arm64-v8a"
         }
     }
+
+    buildFeatures { buildConfig = true }
 
     buildTypes {
         create("field") {
@@ -33,7 +43,13 @@ android {
 }
 
 dependencies {
-    implementation("com.google.code.gson:gson:2.14.0")
+    if (providers.gradleProperty("usePublishedBridge").orNull == "true") {
+        implementation("com.roomtwin:native-ai:0.1.0")
+    } else {
+        implementation(project(":bridge"))
+    }
+    implementation("androidx.core:core:1.17.0")
     testImplementation("junit:junit:4.13.2")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
+    implementation("com.google.code.gson:gson:2.14.0")
+    "fieldImplementation"("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
 }

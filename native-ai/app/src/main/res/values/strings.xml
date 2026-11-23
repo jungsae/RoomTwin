@@ -1,16 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Gemma 4 E2B 실습</string>
-    <string name="prompt_hint">모델에 보낼 질문</string>
     <string name="pick_image">이미지 선택</string>
     <string name="change_image">이미지 변경</string>
     <string name="clear_image">이미지 제거</string>
-    <string name="run_inference">추론 실행</string>
     <string name="backend_cpu">CPU</string>
     <string name="backend_gpu">GPU</string>
     <string name="ready">실행 대기 중</string>
     <string name="working">모델 준비 및 추론 중</string>
-    <string name="completed">완료</string>
     <string name="missing_prompt">질문을 입력해 주세요.</string>
     <string name="storage_unavailable">앱 전용 외부 저장소를 사용할 수 없습니다.</string>
     <string name="model_missing">모델 파일이 없거나 읽을 수 없습니다. 파일 배치 경로\n%1$s</string>
